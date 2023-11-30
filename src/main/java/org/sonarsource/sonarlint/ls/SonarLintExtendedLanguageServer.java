@@ -31,12 +31,13 @@ import org.eclipse.lsp4j.jsonrpc.services.JsonRequest;
 import org.eclipse.lsp4j.jsonrpc.validation.NonNull;
 import org.eclipse.lsp4j.services.LanguageServer;
 import org.eclipse.lsp4j.util.Preconditions;
-import org.sonarsource.sonarlint.core.clientapi.backend.analysis.GetSupportedFilePatternsResponse;
-import org.sonarsource.sonarlint.core.clientapi.backend.binding.GetBindingSuggestionParams;
-import org.sonarsource.sonarlint.core.clientapi.backend.connection.auth.HelpGenerateUserTokenResponse;
-import org.sonarsource.sonarlint.core.clientapi.backend.issue.ReopenIssueResponse;
-import org.sonarsource.sonarlint.core.clientapi.backend.issue.ResolutionStatus;
-import org.sonarsource.sonarlint.core.clientapi.client.binding.GetBindingSuggestionsResponse;
+import org.sonarsource.sonarlint.core.rpc.protocol.backend.analysis.GetSupportedFilePatternsResponse;
+import org.sonarsource.sonarlint.core.rpc.protocol.backend.binding.GetBindingSuggestionParams;
+import org.sonarsource.sonarlint.core.rpc.protocol.backend.connection.auth.HelpGenerateUserTokenResponse;
+import org.sonarsource.sonarlint.core.rpc.protocol.backend.issue.ReopenAllIssuesForFileResponse;
+import org.sonarsource.sonarlint.core.rpc.protocol.backend.issue.ReopenIssueResponse;
+import org.sonarsource.sonarlint.core.rpc.protocol.backend.issue.ResolutionStatus;
+import org.sonarsource.sonarlint.core.rpc.protocol.client.binding.GetBindingSuggestionsResponse;
 
 public interface SonarLintExtendedLanguageServer extends LanguageServer {
 
@@ -224,6 +225,7 @@ public interface SonarLintExtendedLanguageServer extends LanguageServer {
     private final String token;
 
     public OnTokenUpdateNotificationParams(String connectionId, String token) {
+      List.of();
       this.connectionId = connectionId;
       this.token = token;
     }
@@ -628,7 +630,7 @@ public interface SonarLintExtendedLanguageServer extends LanguageServer {
   }
 
   @JsonNotification("sonarlint/reopenResolvedLocalIssues")
-  CompletableFuture<ReopenIssueResponse> reopenResolvedLocalIssues(ReopenAllIssuesForFileParams params);
+  CompletableFuture<ReopenAllIssuesForFileResponse> reopenResolvedLocalIssues(ReopenAllIssuesForFileParams params);
 
   class ReopenAllIssuesForFileParams {
     private final String relativePath;

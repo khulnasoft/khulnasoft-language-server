@@ -31,6 +31,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutionException;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -42,11 +43,13 @@ import javax.annotation.Nullable;
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
 import org.sonarsource.sonarlint.core.client.api.connected.ConnectedSonarLintEngine;
-import org.sonarsource.sonarlint.core.clientapi.backend.config.binding.BindingConfigurationDto;
-import org.sonarsource.sonarlint.core.clientapi.backend.config.binding.DidUpdateBindingParams;
-import org.sonarsource.sonarlint.core.clientapi.backend.connection.validate.ValidateConnectionParams;
 import org.sonarsource.sonarlint.core.commons.log.ClientLogOutput;
 import org.sonarsource.sonarlint.core.http.HttpClient;
+import org.sonarsource.sonarlint.core.rpc.protocol.backend.config.binding.BindingConfigurationDto;
+import org.sonarsource.sonarlint.core.rpc.protocol.backend.config.binding.DidUpdateBindingParams;
+import org.sonarsource.sonarlint.core.rpc.protocol.backend.connection.projects.SonarProjectDto;
+import org.sonarsource.sonarlint.core.rpc.protocol.backend.connection.validate.ValidateConnectionParams;
+import org.sonarsource.sonarlint.core.rpc.protocol.backend.file.GetPathTranslationResponse;
 import org.sonarsource.sonarlint.core.serverapi.EndpointParams;
 import org.sonarsource.sonarlint.core.serverapi.component.ServerProject;
 import org.sonarsource.sonarlint.core.serverconnection.DownloadException;
@@ -57,6 +60,7 @@ import org.sonarsource.sonarlint.ls.DiagnosticPublisher;
 import org.sonarsource.sonarlint.ls.EnginesFactory;
 import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageClient;
 import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageClient.ConnectionCheckResult;
+import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageServer;
 import org.sonarsource.sonarlint.ls.backend.BackendServiceFacade;
 import org.sonarsource.sonarlint.ls.connected.domain.TaintIssue;
 import org.sonarsource.sonarlint.ls.folders.WorkspaceFolderWrapper;
@@ -71,6 +75,7 @@ import org.sonarsource.sonarlint.ls.settings.WorkspaceFolderSettingsChangeListen
 import org.sonarsource.sonarlint.ls.settings.WorkspaceSettings;
 import org.sonarsource.sonarlint.ls.settings.WorkspaceSettingsChangeListener;
 import org.sonarsource.sonarlint.ls.util.FileUtils;
+import org.sonarsource.sonarlint.ls.util.Utils;
 
 import static java.util.Objects.requireNonNull;
 import static java.util.function.Predicate.not;
@@ -211,17 +216,21 @@ public class ProjectBindingManager implements WorkspaceSettingsChangeListener, W
     var engine = engineOpt.get();
     var projectKey = requireNonNull(settings.getProjectKey());
     Supplier<String> branchProvider = () -> resolveBranchNameForFolder(folderRoot.toUri(), engine, projectKey);
-    var httpClient = backendServiceFacade.getBackendService().getHttpClient(connectionId);
-    syncAtStartup(engine, endpointParams, projectKey, branchProvider, httpClient, globalLogOutput);
+    try {
+      var pathTranslationResponse = backendServiceFacade.getPathWithTranslation(folderRoot.toUri().toString()).get();
+      var projectBinding = new ProjectBinding(projectKey, pathTranslationResponse.getServerPathPrefix(), pathTranslationResponse.getIdePathPrefix());
+      globalLogOutput.debug("Resolved binding %s for folder %s",
+        ToStringBuilder.reflectionToString(projectBinding, ToStringStyle.SHORT_PREFIX_STYLE),
+        folderRoot);
+      var issueTrackerWrapper = new ServerIssueTrackerWrapper(engine, endpointParams, projectBinding, branchProvider,
+        backendServiceFacade, foldersManager, globalLogOutput);
+      return new ProjectBindingWrapper(connectionId, projectBinding, engine, issueTrackerWrapper);
+    } catch (InterruptedException e) {
+      throw new RuntimeException(e);
+    } catch (ExecutionException e) {
+      throw new RuntimeException(e);
+    }
 
-    var ideFilePaths = FileUtils.allRelativePathsForFilesInTree(folderRoot, globalLogOutput);
-    var projectBinding = engine.calculatePathPrefixes(projectKey, ideFilePaths);
-    globalLogOutput.debug("Resolved binding %s for folder %s",
-      ToStringBuilder.reflectionToString(projectBinding, ToStringStyle.SHORT_PREFIX_STYLE),
-      folderRoot);
-    var issueTrackerWrapper = new ServerIssueTrackerWrapper(engine, endpointParams, projectBinding, branchProvider, httpClient,
-      backendServiceFacade, foldersManager, globalLogOutput);
-    return new ProjectBindingWrapper(connectionId, projectBinding, engine, issueTrackerWrapper);
   }
 
   private static void syncAtStartup(ConnectedSonarLintEngine engine, EndpointParams endpointParams, String projectKey,
@@ -231,7 +240,6 @@ public class ProjectBindingManager implements WorkspaceSettingsChangeListener, W
       engine.sync(endpointParams, httpClient, Set.of(projectKey), null);
       var currentBranchName = branchProvider.get();
       engine.syncServerIssues(endpointParams, httpClient, projectKey, currentBranchName, null);
-      engine.syncServerTaintIssues(endpointParams, httpClient, projectKey, currentBranchName, null);
       engine.syncServerHotspots(endpointParams, httpClient, projectKey, currentBranchName, null);
     } catch (Exception exceptionDuringSync) {
       globalLogOutput.warn("Exception happened during initial sync with project " + projectKey, exceptionDuringSync);
@@ -480,11 +488,7 @@ public class ProjectBindingManager implements WorkspaceSettingsChangeListener, W
   private void updateAllTaintIssuesForOneFolder(@Nullable WorkspaceFolderWrapper folder, ProjectBinding binding, String connectionId) {
     getStartedConnectedEngine(connectionId).ifPresent(engine -> {
       var branchName = resolveBranchNameForFolder(folder == null ? null : folder.getUri(), engine, binding.projectKey());
-      engine.getAllServerTaintIssues(binding, branchName)
-        .stream()
-        .map(ServerTaintIssue::getFilePath)
-        .distinct()
-        .forEach(this::updateTaintIssueCacheFromStorageForServerPath);
+
     });
   }
 
@@ -505,10 +509,9 @@ public class ProjectBindingManager implements WorkspaceSettingsChangeListener, W
         var folder = foldersManager.findFolderForFile(fileUri);
         var folderUri = folder.isPresent() ? folder.get().getUri() : URI.create("");
         var branchName = this.resolveBranchNameForFolder(folderUri, engine, bindingWrapper.getBinding().projectKey());
-        var serverTaintIssues = engine.getServerTaintIssues(bindingWrapper.getBinding(), branchName, filePath, false);
+        // TODO do we need to include resolved?
         var connectionSettings = settingsManager.getCurrentSettings().getServerConnections().get(bindingWrapper.getConnectionId());
         var isSonarCloud = connectionSettings != null && connectionSettings.isSonarCloudAlias();
-        taintVulnerabilitiesCache.reload(fileUri, TaintIssue.from(serverTaintIssues, isSonarCloud));
         diagnosticPublisher.publishDiagnostics(fileUri, false);
       }
     }
@@ -547,17 +550,19 @@ public class ProjectBindingManager implements WorkspaceSettingsChangeListener, W
     if (endpointParams == null) {
       throw new IllegalArgumentException(String.format("No server configuration found with ID '%s'", connectionId));
     }
-    var progress = new NoOpProgressFacade();
-    var engine = getOrCreateConnectedEngine(connectionId)
-      .orElseThrow(() -> new IllegalArgumentException(String.format("No connected engine found with ID '%s'", connectionId)));
     try {
-      var httpClient = backendServiceFacade.getBackendService().getHttpClient(connectionId);
-      return engine.downloadAllProjects(endpointParams, httpClient, progress.asCoreMonitor())
-        .values()
-        .stream()
-        .collect(Collectors.toMap(ServerProject::getKey, ServerProject::getName));
+      var connectionSettings = settingsManager.getCurrentSettings().getServerConnections().get(connectionId);
+      var connectionParams = Utils.getValidateConnectionParamsForNewConnection(
+        new SonarLintExtendedLanguageServer.ConnectionCheckParams(connectionSettings.getToken(),
+          connectionSettings.getOrganizationKey(), connectionSettings.getServerUrl()));
+      var allProjectsResponse = backendServiceFacade.getAllProjects(connectionParams.getTransientConnection()).get();
+      return allProjectsResponse.getSonarProjects().stream().collect(Collectors.toMap(SonarProjectDto::getKey, SonarProjectDto::getName));
     } catch (DownloadException downloadFailed) {
       throw new IllegalStateException(String.format("Failed to fetch list of projects from '%s'", connectionId), downloadFailed);
+    } catch (ExecutionException e) {
+      throw new RuntimeException(e);
+    } catch (InterruptedException e) {
+      throw new RuntimeException(e);
     }
   }
 }

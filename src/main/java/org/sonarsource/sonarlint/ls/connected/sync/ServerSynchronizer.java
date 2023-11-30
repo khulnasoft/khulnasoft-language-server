@@ -82,9 +82,9 @@ public class ServerSynchronizer {
 
   private void updateBindings(Map<String, Map<String, Set<String>>> projectKeyByConnectionIdsToUpdate,
     ProgressFacade progress) {
-    var failedConnectionIds = tryUpdateConnectionsAndBoundProjectStorages(projectKeyByConnectionIdsToUpdate, progress);
-    showOperationResult(failedConnectionIds);
-    triggerAnalysisOfAllOpenFilesInBoundFolders(failedConnectionIds);
+//    var failedConnectionIds = tryUpdateConnectionsAndBoundProjectStorages(projectKeyByConnectionIdsToUpdate, progress);
+//    showOperationResult(failedConnectionIds);
+//    triggerAnalysisOfAllOpenFilesInBoundFolders(failedConnectionIds);
   }
 
   private void triggerAnalysisOfAllOpenFilesInBoundFolders(Set<String> failedConnectionIds) {
@@ -105,16 +105,6 @@ public class ServerSynchronizer {
     }
   }
 
-  private Set<String> tryUpdateConnectionsAndBoundProjectStorages(Map<String, Map<String, Set<String>>> projectKeyByConnectionIdsToUpdate, ProgressFacade progress) {
-    var failedConnectionIds = new LinkedHashSet<String>();
-    projectKeyByConnectionIdsToUpdate.forEach(
-      (connectionId, projectKeys) -> {
-        var progressFraction = 1.0f / projectKeyByConnectionIdsToUpdate.size();
-        var httpClient = backendServiceFacade.getBackendService().getHttpClient(connectionId);
-        tryUpdateConnectionAndBoundProjectsStorages(progress, failedConnectionIds, connectionId, projectKeys, progressFraction, httpClient);
-      });
-    return failedConnectionIds;
-  }
 
   private void tryUpdateConnectionAndBoundProjectsStorages(ProgressFacade progress, Set<String> failedConnectionIds, String connectionId,
     Map<String, Set<String>> branchNamesByProjectKey, float progressFraction, HttpClient httpClient) {
@@ -175,7 +165,6 @@ public class ServerSynchronizer {
   private static void syncIssuesForBranch(ConnectedSonarLintEngine engine, EndpointParams endpointParams, String projectKey,
     String branchName, HttpClient httpClient, @Nullable ClientProgressMonitor progressMonitor) {
     engine.syncServerIssues(endpointParams, httpClient, projectKey, branchName, progressMonitor);
-    engine.syncServerTaintIssues(endpointParams, httpClient, projectKey, branchName, progressMonitor);
     engine.syncServerHotspots(endpointParams, httpClient, projectKey, branchName, progressMonitor);
   }
 
@@ -196,8 +185,8 @@ public class ServerSynchronizer {
         logOutput.debug("Synchronizing storages...");
         projectsToSynchronize.forEach((connectionId, branchNamesByProjectKey) -> bindingManager.getStartedConnectedEngine(connectionId)
           .ifPresent(engine -> {
-            var httpClient = backendServiceFacade.getBackendService().getHttpClient(connectionId);
-            syncOneEngine(connectionId, branchNamesByProjectKey, engine, httpClient, null);
+//            var httpClient = backendServiceFacade.getBackendService().getHttpClient(connectionId);
+//            syncOneEngine(connectionId, branchNamesByProjectKey, engine, httpClient, null);
           })
         );
         bindingManager.updateAllTaintIssues();
