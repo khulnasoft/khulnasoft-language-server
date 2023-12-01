@@ -32,8 +32,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.stream.Collectors;
 import org.assertj.core.api.Assertions;
-import org.eclipse.lsp4j.MessageType;
 import org.eclipse.lsp4j.jsonrpc.CancelChecker;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,6 +50,8 @@ import org.sonarsource.sonarlint.core.rpc.protocol.client.binding.AssistBindingP
 import org.sonarsource.sonarlint.core.rpc.protocol.client.binding.SuggestBindingParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.connection.AssistCreatingConnectionParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.fs.FindFileByNamesInScopeParams;
+import org.sonarsource.sonarlint.core.rpc.protocol.client.fs.FindFileByNamesInScopeResponse;
+import org.sonarsource.sonarlint.core.rpc.protocol.client.fs.FoundFileDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.hotspot.HotspotDetailsDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.hotspot.ShowHotspotParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.http.CheckServerTrustedParams;
@@ -57,14 +59,13 @@ import org.sonarsource.sonarlint.core.rpc.protocol.client.http.X509CertificateDt
 import org.sonarsource.sonarlint.core.rpc.protocol.client.info.GetClientLiveInfoResponse;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.issue.IssueDetailsDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.issue.ShowIssueParams;
-import org.sonarsource.sonarlint.core.rpc.protocol.client.message.ShowMessageParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.message.ShowSoonUnsupportedMessageParams;
-import org.sonarsource.sonarlint.core.rpc.protocol.client.progress.StartProgressParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.smartnotification.ShowSmartNotificationParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.sync.DidSynchronizeConfigurationScopeParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.common.TextRangeDto;
 import org.sonarsource.sonarlint.core.serverconnection.ProjectBinding;
 import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageClient;
+import org.sonarsource.sonarlint.ls.commands.ShowAllLocationsCommand;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingManager;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingWrapper;
 import org.sonarsource.sonarlint.ls.connected.ServerIssueTrackerWrapper;
@@ -103,6 +104,8 @@ class SonarLintVSCodeClientTests {
   RequestsHandlerServer server = mock(RequestsHandlerServer.class);
   ProjectBindingManager bindingManager = mock(ProjectBindingManager.class);
   ServerSentEventsHandlerService serverSentEventsHandlerService = mock(ServerSentEventsHandlerService.class);
+  @Captor
+  ArgumentCaptor<ShowAllLocationsCommand.Param> paramCaptor;
   ProjectBinding binding = mock(ProjectBinding.class);
   ConnectedSonarLintEngine engine = mock(ConnectedSonarLintEngine.class);
   ServerIssueTrackerWrapper serverIssueTrackerWrapper = mock(ServerIssueTrackerWrapper.class);
@@ -161,16 +164,19 @@ class SonarLintVSCodeClientTests {
 
   @Test
   void openUrlInBrowserTest() throws MalformedURLException {
-    var params = new OpenUrlInBrowserParams("url");
+    var params = new OpenUrlInBrowserParams("https://www.sonarsource.com");
 
-    underTest.openUrlInBrowser(new URL("url"));
+    underTest.openUrlInBrowser(new URL("https://www.sonarsource.com"));
 
     verify(client).browseTo(params.getUrl());
   }
 
   @Test
   void shouldCallClientToFindFile() {
+    when(client.findFileByNamesInFolder(any())).thenReturn(CompletableFuture.completedFuture(new FindFileByNamesInScopeResponse(List.of())));
+
     underTest.findFileByNamesInScope("configScopeId", List.of(), mock(CancelChecker.class));
+
     var expectedClientParams =
       new SonarLintExtendedLanguageClient.FindFileByNamesInFolder("configScopeId", List.of());
     verify(client).findFileByNamesInFolder(expectedClientParams);
@@ -254,7 +260,11 @@ class SonarLintVSCodeClientTests {
   void shouldAskTheClientToFindFiles() {
     var folderUri = "file:///some/folder";
     var filesToFind = List.of("file1", "file2");
-    var params = new FindFileByNamesInScopeParams(folderUri, filesToFind);
+    var params = new SonarLintExtendedLanguageClient.FindFileByNamesInFolder(folderUri, filesToFind);
+    when(client.findFileByNamesInFolder(params))
+      .thenReturn(CompletableFuture.completedFuture(new FindFileByNamesInScopeResponse(filesToFind.stream()
+        .map(f -> new FoundFileDto(f, folderUri + "/" + f, "")).collect(Collectors.toList()))));
+
     underTest.findFileByNamesInScope(folderUri, filesToFind, mock(CancelChecker.class));
     var argumentCaptor = ArgumentCaptor.forClass(SonarLintExtendedLanguageClient.FindFileByNamesInFolder.class);
     verify(client).findFileByNamesInFolder(argumentCaptor.capture());
@@ -269,7 +279,10 @@ class SonarLintVSCodeClientTests {
 
   @Test
   void shouldCallServerOnGetHostInfo() {
+    when(server.getHostInfo()).thenReturn(new GetClientLiveInfoResponse("description"));
+
     underTest.getClientLiveDescription();
+
     verify(server).getHostInfo();
   }
 
@@ -301,18 +314,16 @@ class SonarLintVSCodeClientTests {
   @Test
   void assistCreateConnectionShouldCallServerMethod() {
     var assistCreatingConnectionParams = new AssistCreatingConnectionParams("http://localhost:9000");
-    var future = underTest.assistCreatingConnection(assistCreatingConnectionParams, mock(CancelChecker.class));
+    assertThrows(UnsupportedOperationException.class, () -> underTest.assistCreatingConnection(assistCreatingConnectionParams, mock(CancelChecker.class)));
     verify(server).showIssueOrHotspotHandleUnknownServer(assistCreatingConnectionParams.getServerUrl());
-    assertThat(future).isNotNull();
   }
 
   @Test
   void assistBindingShouldCallServerMethod() {
     var assistBindingParams = new AssistBindingParams("connectionId", "projectKey");
-    var future = underTest.assistBinding(assistBindingParams, mock(CancelChecker.class));
 
+    assertThrows(UnsupportedOperationException.class, () -> underTest.assistBinding(assistBindingParams, mock(CancelChecker.class)));
     verify(server).showHotspotOrIssueHandleNoBinding(assistBindingParams);
-    assertThat(future).isNotNull();
   }
 
   @Test
@@ -368,55 +379,46 @@ class SonarLintVSCodeClientTests {
     assertThat(response).isTrue();
   }
 
-//  @Test
-//  void shouldForwardServerSentEvent() {
-//    var serverEvent = new IssueChangedEvent("projectKey", List.of("issueKey"), IssueSeverity.MAJOR, RuleType.BUG, false);
-//    var params = new DidReceiveServerEventParams("connectionId", serverEvent);
-//    underTest.didReceiveServerEvent(params);
-//
-//    verify(serverSentEventsHandlerService).handleEvents(serverEvent);
-//  }
+  @Test
+  void shouldForwardOpenIssueRequest() {
+    var fileUri = fileInAWorkspaceFolderPath.toUri();
+    var textRangeDto = new TextRangeDto(1, 2, 3, 4);
+    var issueDetailsDto = new IssueDetailsDto(textRangeDto, "connectionId", "rule:S1234",
+      "issueKey", FILE_PYTHON, "this is wrong", "29.09.2023", "print('ddd')",
+      "", false, List.of());
+    var showIssueParams = new ShowIssueParams(fileUri.toString(), issueDetailsDto);
 
-//  @Test
-//  void shouldForwardOpenIssueRequest() {
-//    var fileUri = fileInAWorkspaceFolderPath.toUri();
-//    var textRangeDto = new TextRangeDto(1, 2, 3, 4);
-//    var issueDetailsDto = new IssueDetailsDto(textRangeDto, "connectionId", "rule:S1234",
-//      "issueKey", FILE_PYTHON, "this is wrong", "29.09.2023", "print('ddd')",
-//      "", false, List.of());
-//    var showIssueParams = new ShowIssueParams(fileUri.toString(), issueDetailsDto);
-//
-//    when(bindingManager.serverPathToFileUri(showIssueParams.getConfigurationScopeId()))
-//      .thenReturn(Optional.of(fileUri));
-//    when(bindingManager.getBinding(fileUri))
-//      .thenReturn(Optional.of(new ProjectBindingWrapper("connectionId", binding, engine, serverIssueTrackerWrapper)));
-//
-//    underTest.showIssue(fileUri.toString(), issueDetailsDto);
-//    verify(client).showIssue(paramCaptor.capture());
-//
-//    var showAllLocationParams = paramCaptor.getValue();
-//
-//    assertEquals(showIssueParams.getIssueDetails().getFlows().size(), showAllLocationParams.getFlows().size());
-//    assertEquals("", showAllLocationParams.getSeverity());
-//    assertEquals(showIssueParams.getIssueDetails().getMessage(), showAllLocationParams.getMessage());
-//    assertEquals(showIssueParams.getIssueDetails().getRuleKey(), showAllLocationParams.getRuleKey());
-//  }
+    when(bindingManager.serverPathToFileUri(showIssueParams.getConfigurationScopeId()))
+      .thenReturn(Optional.of(fileUri));
+    when(bindingManager.getBinding(fileUri))
+      .thenReturn(Optional.of(new ProjectBindingWrapper("connectionId", binding, engine, serverIssueTrackerWrapper)));
 
-//  @Test
-//  void shouldNotForwardOpenIssueRequestWhenBindingDoesNotExist() {
-//    var fileUri = fileInAWorkspaceFolderPath.toUri();
-//    var textRangeDto = new TextRangeDto(1, 2, 3, 4);
-//    var issueDetailsDto = new IssueDetailsDto(textRangeDto, "connectionId", "rule:S1234",
-//      "issueKey", FILE_PYTHON, "bb", null, "this is wrong", "29.09.2023", "print('ddd')",
-//      "", false, List.of());
-//    var showIssueParams = new ShowIssueParams(fileUri.toString(), issueDetailsDto);
-//
-//    when(bindingManager.serverPathToFileUri(showIssueParams.getConfigurationScopeId()))
-//      .thenReturn(Optional.of(fileUri));
-//    when(bindingManager.getBinding(fileUri))
-//      .thenReturn(Optional.empty());
-//
-//    underTest.showIssue(fileUri.toString(), issueDetailsDto);
-//    verify(client, never()).showIssue(any(ShowAllLocationsCommand.Param.class));
-//  }
+    underTest.showIssue(fileUri.toString(), issueDetailsDto);
+    verify(client).showIssue(paramCaptor.capture());
+
+    var showAllLocationParams = paramCaptor.getValue();
+
+    assertEquals(showIssueParams.getIssueDetails().getFlows().size(), showAllLocationParams.getFlows().size());
+    assertEquals("", showAllLocationParams.getSeverity());
+    assertEquals(showIssueParams.getIssueDetails().getMessage(), showAllLocationParams.getMessage());
+    assertEquals(showIssueParams.getIssueDetails().getRuleKey(), showAllLocationParams.getRuleKey());
+  }
+
+  @Test
+  void shouldNotForwardOpenIssueRequestWhenBindingDoesNotExist() {
+    var fileUri = fileInAWorkspaceFolderPath.toUri();
+    var textRangeDto = new TextRangeDto(1, 2, 3, 4);
+    var issueDetailsDto = new IssueDetailsDto(textRangeDto, "rule:S1234",
+      "issueKey", FILE_PYTHON, "bb", null, "this is wrong", "29.09.2023", "print('ddd')",
+      false, List.of());
+    var showIssueParams = new ShowIssueParams(fileUri.toString(), issueDetailsDto);
+
+    when(bindingManager.serverPathToFileUri(showIssueParams.getConfigurationScopeId()))
+      .thenReturn(Optional.of(fileUri));
+    when(bindingManager.getBinding(fileUri))
+      .thenReturn(Optional.empty());
+
+    underTest.showIssue(fileUri.toString(), issueDetailsDto);
+    verify(client, never()).showIssue(any(ShowAllLocationsCommand.Param.class));
+  }
 }

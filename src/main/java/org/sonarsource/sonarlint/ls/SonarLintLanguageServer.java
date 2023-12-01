@@ -20,7 +20,6 @@
 package org.sonarsource.sonarlint.ls;
 
 import com.google.common.annotations.VisibleForTesting;
-import org.sonarsource.sonarlint.core.rpc.protocol.SonarLintRpcServer;
 import org.sonarsource.sonarlint.core.rpc.protocol.common.Language;
 import com.google.gson.JsonPrimitive;
 import java.io.BufferedReader;
@@ -102,7 +101,6 @@ import org.sonarsource.sonarlint.core.rpc.protocol.backend.issue.AddIssueComment
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.issue.ReopenAllIssuesForFileResponse;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.binding.GetBindingSuggestionsResponse;
 
-import org.sonarsource.sonarlint.core.rules.RuleDetailsAdapter;
 import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageClient.ConnectionCheckResult;
 import org.sonarsource.sonarlint.ls.backend.BackendInitParams;
 import org.sonarsource.sonarlint.ls.backend.BackendServiceFacade;
@@ -112,9 +110,7 @@ import org.sonarsource.sonarlint.ls.connected.ProjectBindingManager;
 import org.sonarsource.sonarlint.ls.connected.TaintIssuesUpdater;
 import org.sonarsource.sonarlint.ls.connected.TaintVulnerabilitiesCache;
 import org.sonarsource.sonarlint.ls.connected.api.RequestsHandlerServer;
-import org.sonarsource.sonarlint.ls.connected.events.ServerSentEventsHandlerService;
 import org.sonarsource.sonarlint.ls.connected.notifications.SmartNotifications;
-import org.sonarsource.sonarlint.ls.connected.sync.ServerSynchronizer;
 import org.sonarsource.sonarlint.ls.file.FileTypeClassifier;
 import org.sonarsource.sonarlint.ls.file.OpenFilesCache;
 import org.sonarsource.sonarlint.ls.file.VersionedOpenFile;
@@ -177,7 +173,6 @@ public class SonarLintLanguageServer implements SonarLintExtendedLanguageServer,
   private final IssuesCache securityHotspotsCache;
   private final DiagnosticPublisher diagnosticPublisher;
   private final ScmIgnoredCache scmIgnoredCache;
-  private final ServerSynchronizer serverSynchronizer;
   private final LanguageClientLogger lsLogOutput;
 
   private final TaintIssuesUpdater taintIssuesUpdater;
@@ -259,8 +254,7 @@ public class SonarLintLanguageServer implements SonarLintExtendedLanguageServer,
     bindingManager.setAnalysisManager(analysisScheduler);
     this.settingsManager.addListener((WorkspaceSettingsChangeListener) analysisScheduler);
     this.settingsManager.addListener((WorkspaceFolderSettingsChangeListener) analysisScheduler);
-    this.serverSynchronizer = new ServerSynchronizer(client, progressManager, bindingManager, analysisScheduler, backendServiceFacade, globalLogOutput);
-    this.commandManager = new CommandManager(client, settingsManager, bindingManager, serverSynchronizer, telemetry, taintVulnerabilitiesCache,
+    this.commandManager = new CommandManager(client, settingsManager, bindingManager, telemetry, taintVulnerabilitiesCache,
       issuesCache, securityHotspotsCache, backendServiceFacade, workspaceFoldersManager, openNotebooksCache, globalLogOutput);
 
     this.branchManager = new WorkspaceFolderBranchManager(client, bindingManager, backendServiceFacade, globalLogOutput);
@@ -405,7 +399,6 @@ public class SonarLintLanguageServer implements SonarLintExtendedLanguageServer,
         taintIssuesUpdater::shutdown,
         // shutdown engines after the rest so that no operations remain on them, and they won't be recreated accidentally
         bindingManager::shutdown,
-        serverSynchronizer::shutdown,
         standaloneEngineManager::shutdown,
         backendServiceFacade::shutdown)
       // Do last

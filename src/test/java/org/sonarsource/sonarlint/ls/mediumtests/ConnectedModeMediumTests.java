@@ -437,6 +437,9 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
 
   @Test
   void analysisConnected_no_matching_server_issues() {
+    mockWebServerExtension.addStringResponse("/api/system/status", "{\"status\": \"UP\", \"version\": \"9.7\", \"id\": \"xzy\"}");
+    mockNoIssuesNoHotspotsForProject();
+    mockWebServerExtension.addStringResponse("/api/authentication/validate?format=json", "{\"valid\": true}");
     mockWebServerExtension.addProtobufResponseDelimited(
       "/batch/issues?key=myProject%3AinFolder.py",
       ScannerInput.ServerIssue.newBuilder()
@@ -452,6 +455,23 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
       Issues.SearchWsResponse.newBuilder().addIssues(Issues.Issue.newBuilder().setKey("issueKey").build()).build());
     mockWebServerExtension.addProtobufResponse("/api/issues/search.protobuf?statuses=OPEN,CONFIRMED,REOPENED,RESOLVED&types=VULNERABILITY&componentKeys=myProject&rules=&branch=master&ps=500&p=2",
       Issues.SearchWsResponse.newBuilder().addComponents(Issues.Component.newBuilder().setKey("componentKey").setPath("componentPath").build()).build());
+    mockWebServerExtension.addProtobufResponse("/api/measures/component.protobuf?additionalFields=period&metricKeys=projects&component=myProject",
+      Measures.ComponentWsResponse.newBuilder()
+        .setComponent(Measures.Component.newBuilder()
+          .setKey("myProject")
+          .setQualifier("TRK")
+          .build())
+        .setPeriod(Measures.Period.newBuilder()
+          .setMode("PREVIOUS_VERSION")
+          .setDate("2023-08-29T09:37:59+0000")
+          .setParameter("9.2")
+          .build())
+        .build());
+    mockWebServerExtension.addProtobufResponseDelimited(
+      "/api/issues/pull_taint?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST + "&changedSince=" + CURRENT_TIME,
+      Issues.TaintVulnerabilityPullQueryTimestamp.newBuilder()
+        .setQueryTimestamp(CURRENT_TIME)
+        .build());
     var uriInFolder = folder1BaseDir.resolve("inFolder.py").toUri().toString();
     didOpen(uriInFolder, "python", "def foo():\n  toto = 0\n  plouf = 0\n");
 
@@ -583,6 +603,7 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
   @Test
   void shouldReturnRemoteProjectsForKnownConnection() throws ExecutionException, InterruptedException {
     mockNoIssuesNoHotspotsForProject();
+
     mockWebServerExtension.addProtobufResponseDelimited(
       "/api/issues/pull_taint?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST + "&changedSince=" + CURRENT_TIME,
       Issues.TaintVulnerabilityPullQueryTimestamp.newBuilder()
@@ -630,7 +651,7 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
 
     var result = lsProxy.generateToken(params);
 
-    assertThatThrownBy(result::get).hasMessage("org.eclipse.lsp4j.jsonrpc.ResponseErrorException: Internal error.");
+    assertThatThrownBy(result::get).hasMessage("org.eclipse.lsp4j.jsonrpc.ResponseErrorException: Task 'check support for token generation' failed: org.apache.hc.core5.http.ProtocolException: Target host is not specified");
   }
 
   @Test
@@ -849,7 +870,7 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
   }
 
   @Test
-  void change_hotspot_status_to_acknowledged() {
+  void change_hotspot_status_to_acknowledged() throws InterruptedException {
     var analyzedFileName = "hotspot_acknowledged.py";
 
     mockWebServerExtension.addStringResponse("/api/system/status", "{\"status\": \"UP\", \"version\": \"10.1\", \"id\": \"xzy\"}");
@@ -888,6 +909,38 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
         .setRuleKey(PYTHON_S1313)
         .build()
     );
+    mockWebServerExtension.addProtobufResponseDelimited(
+      "/api/hotspots/pull?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST + "&changedSince=" + CURRENT_TIME,
+      Hotspots.HotspotPullQueryTimestamp.newBuilder().setQueryTimestamp(CURRENT_TIME).build(),
+      Hotspots.HotspotLite.newBuilder()
+        .setKey(hotspotKey)
+        .setFilePath(analyzedFileName)
+        .setCreationDate(System.currentTimeMillis())
+        .setStatus("TO_REVIEW")
+        .setVulnerabilityProbability("LOW")
+        .setTextRange(Hotspots.TextRange.newBuilder()
+          .setStartLine(1)
+          .setStartLineOffset(13)
+          .setEndLine(1)
+          .setEndLineOffset(26)
+          .setHash(Utils.hash("'12.34.56.78'"))
+          .build()
+        )
+        .setRuleKey(PYTHON_S1313)
+        .build()
+    );
+    mockWebServerExtension.addProtobufResponse("/api/measures/component.protobuf?additionalFields=period&metricKeys=projects&component=myProject",
+      Measures.ComponentWsResponse.newBuilder()
+        .setComponent(Measures.Component.newBuilder()
+          .setKey("myProject")
+          .setQualifier("TRK")
+          .build())
+        .setPeriod(Measures.Period.newBuilder()
+          .setMode("PREVIOUS_VERSION")
+          .setDate("2023-08-29T09:37:59+0000")
+          .setParameter("9.2")
+          .build())
+        .build());
 
 
     var uriInFolder = folder1BaseDir.resolve(analyzedFileName).toUri().toString();
@@ -899,7 +952,7 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
         tuple(0, 13, 0, 26, PYTHON_S1313, "remote", "Make sure using this hardcoded IP address \"12.34.56.78\" is safe here.", DiagnosticSeverity.Warning)));
     assertThat(client.getHotspots(uriInFolder).get(0).getData().toString()).contains("\"status\":0");
 
-    lsProxy.changeHotspotStatus(new SonarLintExtendedLanguageServer.ChangeHotspotStatusParams(hotspotKey, HotspotStatus.ACKNOWLEDGED.name(), uriInFolder));
+    lsProxy.changeHotspotStatus(new SonarLintExtendedLanguageServer.ChangeHotspotStatusParams(hotspotKey, "Acknowledged", uriInFolder));
 
     awaitUntilAsserted(() -> assertThat(client.getHotspots(uriInFolder).get(0).getData().toString()).contains("\"status\":3"));
   }

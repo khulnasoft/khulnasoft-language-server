@@ -76,7 +76,6 @@ import org.sonarsource.sonarlint.ls.connected.DelegatingIssue;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingManager;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingWrapper;
 import org.sonarsource.sonarlint.ls.connected.TaintVulnerabilitiesCache;
-import org.sonarsource.sonarlint.ls.connected.sync.ServerSynchronizer;
 import org.sonarsource.sonarlint.ls.folders.WorkspaceFoldersManager;
 import org.sonarsource.sonarlint.ls.log.LanguageClientLogOutput;
 import org.sonarsource.sonarlint.ls.notebooks.OpenNotebooksCache;
@@ -116,7 +115,6 @@ public class CommandManager {
   private final SonarLintExtendedLanguageClient client;
   private final SettingsManager settingsManager;
   private final ProjectBindingManager bindingManager;
-  private final ServerSynchronizer serverSynchronizer;
   private final SonarLintTelemetry telemetry;
   private final TaintVulnerabilitiesCache taintVulnerabilitiesCache;
   private final IssuesCache issuesCache;
@@ -126,14 +124,13 @@ public class CommandManager {
   private final OpenNotebooksCache openNotebooksCache;
   private final LanguageClientLogOutput logOutput;
 
-  CommandManager(SonarLintExtendedLanguageClient client, SettingsManager settingsManager, ProjectBindingManager bindingManager, ServerSynchronizer serverSynchronizer,
+  CommandManager(SonarLintExtendedLanguageClient client, SettingsManager settingsManager, ProjectBindingManager bindingManager,
     SonarLintTelemetry telemetry, TaintVulnerabilitiesCache taintVulnerabilitiesCache, IssuesCache issuesCache,
     IssuesCache securityHotspotsCache, BackendServiceFacade backendServiceFacade, WorkspaceFoldersManager workspaceFoldersManager,
     OpenNotebooksCache openNotebooksCache, LanguageClientLogOutput logOutput) {
     this.client = client;
     this.settingsManager = settingsManager;
     this.bindingManager = bindingManager;
-    this.serverSynchronizer = serverSynchronizer;
     this.telemetry = telemetry;
     this.taintVulnerabilitiesCache = taintVulnerabilitiesCache;
     this.issuesCache = issuesCache;
@@ -409,7 +406,7 @@ public class CommandManager {
         telemetry.addQuickFixAppliedForRule(getAsString(params.getArguments().get(0)));
         break;
       case SONARLINT_UPDATE_ALL_BINDINGS_COMMAND:
-        serverSynchronizer.updateAllBindings(cancelToken, params.getWorkDoneToken());
+        // No op
         break;
       case SONARLINT_OPEN_STANDALONE_RULE_DESCRIPTION_COMMAND:
         handleOpenStandaloneRuleDescriptionCommand(params);

@@ -95,7 +95,6 @@ class ServerIssueTrackerWrapperTests {
     assertThat(((DelegatingIssue) result.stream().findFirst().get()).getIssueId()).isEqualTo(localOnlyIssueDto.getId());
   }
 
-  @Disabled
   @Test
   void hide_resolved_server_issues() {
     var unresolved = mockIssue();

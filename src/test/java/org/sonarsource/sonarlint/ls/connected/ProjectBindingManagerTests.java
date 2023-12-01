@@ -47,6 +47,9 @@ import org.sonarsource.sonarlint.core.commons.IssueSeverity;
 import org.sonarsource.sonarlint.core.commons.RuleType;
 import org.sonarsource.sonarlint.core.commons.TextRangeWithHash;
 import org.sonarsource.sonarlint.core.commons.log.ClientLogOutput;
+import org.sonarsource.sonarlint.core.rpc.protocol.backend.connection.projects.GetAllProjectsResponse;
+import org.sonarsource.sonarlint.core.rpc.protocol.backend.connection.projects.SonarProjectDto;
+import org.sonarsource.sonarlint.core.rpc.protocol.backend.file.GetPathTranslationResponse;
 import org.sonarsource.sonarlint.core.serverapi.component.ServerProject;
 import org.sonarsource.sonarlint.core.serverconnection.DownloadException;
 import org.sonarsource.sonarlint.core.serverconnection.ProjectBinding;
@@ -149,6 +152,12 @@ class ProjectBindingManagerTests {
     when(fakeEngine2.getServerBranches(any(String.class))).thenReturn(new ProjectBranches(Set.of(BRANCH_NAME), BRANCH_NAME));
     when(enginesFactory.createConnectedEngine(anyString(), any(ServerConnectionSettings.class))).thenReturn(fakeEngine);
     when(backendServiceFacade.getBackendService()).thenReturn(mock(BackendService.class));
+    when(backendServiceFacade.getPathWithTranslation(workspaceFolderPath.toUri().toString()))
+      .thenReturn(CompletableFuture.completedFuture(new GetPathTranslationResponse("idePrefix", "sqPrefix")));
+    when(backendServiceFacade.getPathWithTranslation(workspaceFolderPath2.toUri().toString()))
+      .thenReturn(CompletableFuture.completedFuture(new GetPathTranslationResponse("idePrefix2", "sqPrefix2")));
+    when(backendServiceFacade.getPathWithTranslation(anotherFolderPath.toUri().toString()))
+      .thenReturn(CompletableFuture.completedFuture(new GetPathTranslationResponse("idePrefix2", "sqPrefix2")));
     when(client.getTokenForServer(any())).thenReturn(CompletableFuture.supplyAsync(() -> "token"));
 
     folderBindingCache = new ConcurrentHashMap<>();
@@ -243,9 +252,9 @@ class ProjectBindingManagerTests {
     assertThat(binding.get().getEngine()).isEqualTo(fakeEngine);
     assertThat(binding.get().getConnectionId()).isEqualTo(CONNECTION_ID);
     assertThat(binding.get().getServerIssueTracker()).isNotNull();
-    assertThat(binding.get().getBinding()).isEqualTo(FAKE_BINDING);
+    assertThat(binding.get().getBinding().equals(FAKE_BINDING)).isTrue();
 
-    verify(fakeEngine).calculatePathPrefixes(eq(PROJECT_KEY), argThat(set -> set.contains(FILE_PHP)));
+    //verify(fakeEngine).calculatePathPrefixes(eq(PROJECT_KEY), argThat(set -> set.contains(FILE_PHP)));
   }
 
   @Test
@@ -253,9 +262,8 @@ class ProjectBindingManagerTests {
     mockFileInABoundWorkspaceFolder();
 
     var binding = underTest.getBinding(fileInAWorkspaceFolderPath.toUri());
-    assertThat(binding).isNotEmpty();
 
-    verify(fakeEngine).updateProject(any(), any(), eq(PROJECT_KEY), any());
+    assertThat(binding).isNotEmpty();
   }
 
   @Test
@@ -375,7 +383,7 @@ class ProjectBindingManagerTests {
 
     assertThat(binding).isNotEmpty();
     verify(fakeEngine, never()).stop(anyBoolean());
-    verify(fakeEngine).calculatePathPrefixes(eq(PROJECT_KEY2), any());
+//    verify(fakeEngine).calculatePathPrefixes(eq(PROJECT_KEY2), any());
     assertThat(logTester.logs())
       .anyMatch(log -> log.contains("Resolved binding ProjectBinding[idePathPrefix=idePrefix2,projectKey=myProject2,serverPathPrefix=sqPrefix2] for folder " + workspaceFolderPath.toString()));
   }
@@ -433,7 +441,6 @@ class ProjectBindingManagerTests {
 
     assertThat(binding).isNotEmpty();
     verify(fakeEngine, never()).stop(anyBoolean());
-    verify(fakeEngine).calculatePathPrefixes(eq(PROJECT_KEY2), any());
     assertThat(logTester.logs())
       .anyMatch(log -> log.contains("Resolved binding ProjectBinding[idePathPrefix=idePrefix2,projectKey=myProject2,serverPathPrefix=sqPrefix2] for folder " + anotherFolderPath.toString()));
   }
@@ -458,9 +465,9 @@ class ProjectBindingManagerTests {
     binding = underTest.getBinding(fileInAWorkspaceFolderPath.toUri());
 
     assertThat(binding).isNotEmpty();
-    verify(fakeEngine).calculatePathPrefixes(eq(PROJECT_KEY), any());
+    //verify(fakeEngine).calculatePathPrefixes(eq(PROJECT_KEY), any());
     verify(fakeEngine).stop(false);
-    verify(fakeEngine2).calculatePathPrefixes(eq(PROJECT_KEY), any());
+    //verify(fakeEngine2).calculatePathPrefixes(eq(PROJECT_KEY), any());
     assertThat(logTester.logs())
       .anyMatch(log -> log.contains("Resolved binding ProjectBinding[idePathPrefix=idePrefix2,projectKey=myProject2,serverPathPrefix=sqPrefix2] for folder " + workspaceFolderPath.toString()));
   }
@@ -537,10 +544,8 @@ class ProjectBindingManagerTests {
       .thenReturn(fakeEngine);
 
     var binding = underTest.getBinding(fileInAWorkspaceFolderPath.toUri());
-    assertThat(binding).isNotEmpty();
 
-    verify(fakeEngine).updateProject(any(), any(), eq(PROJECT_KEY), any());
-    verify(fakeEngine).sync(any(), any(), eq(Set.of(PROJECT_KEY)), any());
+    assertThat(binding).isNotEmpty();
   }
 
   @Test
@@ -579,10 +584,11 @@ class ProjectBindingManagerTests {
     var project2 = mock(ServerProject.class);
     when(project2.getKey()).thenReturn(key2);
     when(project2.getName()).thenReturn(name2);
-    when(fakeEngine.downloadAllProjects(any(), any(), any())).thenReturn(Map.of(
-      key1, project1,
-      key2, project2
-    ));
+    when(backendServiceFacade.getAllProjects(any()))
+      .thenReturn(CompletableFuture.completedFuture(new GetAllProjectsResponse(List.of(
+        new SonarProjectDto(key1, name1),
+        new SonarProjectDto(key2, name2)
+      ))));
     servers.put(CONNECTION_ID, GLOBAL_SETTINGS);
     assertThat(underTest.getRemoteProjects(CONNECTION_ID)).containsExactlyInAnyOrderEntriesOf(Map.of(
       key1, name1,
@@ -596,16 +602,11 @@ class ProjectBindingManagerTests {
     var key2 = "key2";
     var name1 = "name1";
     var name2 = "name2";
-    var project1 = mock(ServerProject.class);
-    when(project1.getKey()).thenReturn(key1);
-    when(project1.getName()).thenReturn(name1);
-    var project2 = mock(ServerProject.class);
-    when(project2.getKey()).thenReturn(key2);
-    when(project2.getName()).thenReturn(name2);
-    when(fakeEngine.downloadAllProjects(any(), any(), any())).thenReturn(Map.of(
-      key1, project1,
-      key2, project2
-    ));
+    when(backendServiceFacade.getAllProjects(any()))
+      .thenReturn(CompletableFuture.completedFuture(new GetAllProjectsResponse(List.of(
+        new SonarProjectDto(key1, name1),
+        new SonarProjectDto(key2, name2)
+     ))));
     servers.put(SettingsManager.connectionIdOrDefault(null), GLOBAL_SETTINGS);
     assertThat(underTest.getRemoteProjects(null)).containsExactlyInAnyOrderEntriesOf(Map.of(
       key1, name1,
@@ -622,7 +623,7 @@ class ProjectBindingManagerTests {
 
   @Test
   void should_wrap_download_exception_when_downloading_projects() {
-    when(fakeEngine.downloadAllProjects(any(), any(), any())).thenThrow(DownloadException.class);
+    when(backendServiceFacade.getAllProjects(any())).thenThrow(DownloadException.class);
     servers.put(CONNECTION_ID, GLOBAL_SETTINGS);
     assertThatThrownBy(() -> underTest.getRemoteProjects(CONNECTION_ID))
       .isInstanceOf(IllegalStateException.class)

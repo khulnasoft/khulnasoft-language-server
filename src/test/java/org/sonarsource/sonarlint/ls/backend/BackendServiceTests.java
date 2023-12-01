@@ -31,6 +31,7 @@ import org.sonarsource.sonarlint.core.client.api.connected.ConnectedSonarLintEng
 import org.sonarsource.sonarlint.core.hotspot.HotspotService;
 import org.sonarsource.sonarlint.core.rpc.protocol.SonarLintRpcServer;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.branch.DidChangeActiveSonarProjectBranchParams;
+import org.sonarsource.sonarlint.core.rpc.protocol.backend.branch.DidVcsRepositoryChangeParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.branch.SonarProjectBranchRpcService;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.config.ConfigurationRpcService;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.config.binding.DidUpdateBindingParams;
@@ -110,19 +111,18 @@ class BackendServiceTests {
     assertThat(result.getBinding().isBindingSuggestionDisabled()).isFalse();
   }
 
-//  @Test
-//  void notifyBackendOnBranchChanged() {
-//    var branchService = mock(SonarProjectBranchRpcService.class);
-//    when(backend.getSonarProjectBranchService()).thenReturn(branchService);
-//    var paramsArgumentCaptor = ArgumentCaptor.forClass(DidChangeActiveSonarProjectBranchParams.class);
-//    var expectedParams = new DidChangeActiveSonarProjectBranchParams("f", "b");
-//
-//    underTest.notifyBackendOnBranchChanged("f", "b");
-//
-//    verify(branchService).didChangeActiveSonarProjectBranch(paramsArgumentCaptor.capture());
-//    var actualParams = paramsArgumentCaptor.getValue();
-//    assertThat(expectedParams.getConfigScopeId()).isEqualTo(actualParams.getConfigScopeId());
-//    assertThat(expectedParams.getNewActiveBranchName()).isEqualTo(actualParams.getNewActiveBranchName());
-//  }
+  @Test
+  void notifyBackendOnBranchChanged() {
+    var branchService = mock(SonarProjectBranchRpcService.class);
+    when(backend.getSonarProjectBranchService()).thenReturn(branchService);
+    var paramsArgumentCaptor = ArgumentCaptor.forClass(DidVcsRepositoryChangeParams.class);
+    var expectedParams = new DidChangeActiveSonarProjectBranchParams("f", "b");
+
+    underTest.notifyBackendOnVscChange("f");
+
+    verify(branchService).didVcsRepositoryChange(paramsArgumentCaptor.capture());
+    var actualParams = paramsArgumentCaptor.getValue();
+    assertThat(expectedParams.getConfigScopeId()).isEqualTo(actualParams.getConfigurationScopeId());
+  }
 
 }

@@ -1,6 +1,6 @@
 /*
- * SonarLint Core - Version Control System
- * Copyright (C) 2016-2023 SonarSource SA
+ * SonarLint Language Server
+ * Copyright (C) 2009-2023 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or

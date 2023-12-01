@@ -189,15 +189,7 @@ public class ProjectBindingManager implements WorkspaceSettingsChangeListener, W
   }
 
   private Optional<ProjectBindingWrapper> getBindingAndRepublishTaints(Optional<WorkspaceFolderWrapper> folder, URI fileUri) {
-    var maybeBinding = getBinding(folder, fileUri);
-    maybeBinding.ifPresent(binding ->
-      folder.ifPresent(actualFolder ->
-        updateAllTaintIssuesForOneFolder(actualFolder, binding.getBinding(), binding.getConnectionId())));
-    return maybeBinding;
-  }
-
-  public Optional<ConnectedSonarLintEngine> getStartedConnectedEngine(String connectionId) {
-    return connectedEngineCacheByConnectionId.getOrDefault(connectionId, Optional.empty());
+    return getBinding(folder, fileUri);
   }
 
   @CheckForNull
@@ -233,18 +225,6 @@ public class ProjectBindingManager implements WorkspaceSettingsChangeListener, W
 
   }
 
-  private static void syncAtStartup(ConnectedSonarLintEngine engine, EndpointParams endpointParams, String projectKey,
-    Supplier<String> branchProvider, HttpClient httpClient, LanguageClientLogOutput globalLogOutput) {
-    try {
-      engine.updateProject(endpointParams, httpClient, projectKey, null);
-      engine.sync(endpointParams, httpClient, Set.of(projectKey), null);
-      var currentBranchName = branchProvider.get();
-      engine.syncServerIssues(endpointParams, httpClient, projectKey, currentBranchName, null);
-      engine.syncServerHotspots(endpointParams, httpClient, projectKey, currentBranchName, null);
-    } catch (Exception exceptionDuringSync) {
-      globalLogOutput.warn("Exception happened during initial sync with project " + projectKey, exceptionDuringSync);
-    }
-  }
 
   @CheckForNull
   public EndpointParams getEndpointParamsFor(@Nullable String connectionId) {
@@ -485,17 +465,6 @@ public class ProjectBindingManager implements WorkspaceSettingsChangeListener, W
     });
   }
 
-  private void updateAllTaintIssuesForOneFolder(@Nullable WorkspaceFolderWrapper folder, ProjectBinding binding, String connectionId) {
-    getStartedConnectedEngine(connectionId).ifPresent(engine -> {
-      var branchName = resolveBranchNameForFolder(folder == null ? null : folder.getUri(), engine, binding.projectKey());
-
-    });
-  }
-
-  private void updateTaintIssueCacheFromStorageForServerPath(String filePathFromEvent) {
-    globalLogOutput.debug("Re-publishing taint vulnerabilities for \"%s\"", filePathFromEvent);
-    serverPathToFileUri(filePathFromEvent).ifPresent(this::updateTaintIssueCacheFromStorageForFile);
-  }
 
   public void updateTaintIssueCacheFromStorageForFile(URI fileUri) {
     var workspaceFolder = foldersManager.findFolderForFile(fileUri);

@@ -83,7 +83,6 @@ import org.sonarsource.sonarlint.ls.connected.ProjectBindingManager;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingWrapper;
 import org.sonarsource.sonarlint.ls.connected.TaintVulnerabilitiesCache;
 import org.sonarsource.sonarlint.ls.connected.domain.TaintIssue;
-import org.sonarsource.sonarlint.ls.connected.sync.ServerSynchronizer;
 import org.sonarsource.sonarlint.ls.folders.WorkspaceFolderWrapper;
 import org.sonarsource.sonarlint.ls.folders.WorkspaceFoldersManager;
 import org.sonarsource.sonarlint.ls.notebooks.OpenNotebooksCache;
@@ -134,7 +133,6 @@ class CommandManagerTests {
   private IssuesCache issuesCache;
   private SettingsManager mockSettingsManager;
   private SonarLintTelemetry mockTelemetry;
-  private ServerSynchronizer serverSynchronizer;
   private IssuesCache securityHotspotsCache;
   private BackendServiceFacade backendServiceFacade;
   private BackendService backendService;
@@ -154,22 +152,14 @@ class CommandManagerTests {
     mockTaintVulnerabilitiesCache = mock(TaintVulnerabilitiesCache.class);
     issuesCache = mock(IssuesCache.class);
     mockTelemetry = mock(SonarLintTelemetry.class);
-    serverSynchronizer = mock(ServerSynchronizer.class);
     securityHotspotsCache = mock(IssuesCache.class);
     backendServiceFacade = mock(BackendServiceFacade.class);
     workspaceFoldersManager = mock(WorkspaceFoldersManager.class);
     openNotebooksCache = mock(OpenNotebooksCache.class);
     backendService = mock(BackendService.class);
     when(backendServiceFacade.getBackendService()).thenReturn(backendService);
-    underTest = new CommandManager(mockClient, mockSettingsManager, bindingManager, serverSynchronizer, mockTelemetry,
+    underTest = new CommandManager(mockClient, mockSettingsManager, bindingManager, mockTelemetry,
       mockTaintVulnerabilitiesCache, issuesCache, securityHotspotsCache, backendServiceFacade, workspaceFoldersManager, openNotebooksCache, logTester.getLogger());
-  }
-
-  @Test
-  void updateAllBinding() {
-    underTest.executeCommand(new ExecuteCommandParams(SONARLINT_UPDATE_ALL_BINDINGS_COMMAND, emptyList()), NOP_CANCEL_TOKEN);
-
-    verify(serverSynchronizer).updateAllBindings(NOP_CANCEL_TOKEN, null);
   }
 
   @Test
