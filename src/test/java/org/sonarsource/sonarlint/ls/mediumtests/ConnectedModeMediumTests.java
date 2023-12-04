@@ -235,7 +235,7 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
   }
 
   @Test
-  void analysisConnected_find_tracked_hotspot_before_sq_10_1() {
+  void analysisConnected_find_tracked_hotspot_before_sq_10_1() throws InterruptedException {
     mockWebServerExtension.addStringResponse("/api/system/status", "{\"status\": \"UP\", \"version\": \"10.0\", \"id\": \"xzy\"}");
     mockWebServerExtension.addProtobufResponseDelimited(
       "/api/issues/pull?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST,
@@ -251,6 +251,23 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
       "/api/issues/pull_taint?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST,
       Issues.TaintVulnerabilityPullQueryTimestamp.newBuilder()
         .setQueryTimestamp(CURRENT_TIME)
+        .build());
+    mockWebServerExtension.addProtobufResponseDelimited(
+      "/api/issues/pull_taint?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST + "&changedSince=" + CURRENT_TIME,
+      Issues.TaintVulnerabilityPullQueryTimestamp.newBuilder()
+        .setQueryTimestamp(CURRENT_TIME)
+        .build());
+    mockWebServerExtension.addProtobufResponse("/api/measures/component.protobuf?additionalFields=period&metricKeys=projects&component=myProject",
+      Measures.ComponentWsResponse.newBuilder()
+        .setComponent(Measures.Component.newBuilder()
+          .setKey("myProject")
+          .setQualifier("TRK")
+          .build())
+        .setPeriod(Measures.Period.newBuilder()
+          .setMode("PREVIOUS_VERSION")
+          .setDate("2023-08-29T09:37:59+0000")
+          .setParameter("9.2")
+          .build())
         .build());
     mockWebServerExtension.addProtobufResponse(
       "/api/rules/show.protobuf?key=python:S1313",
@@ -290,18 +307,23 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
     );
 
     var uriInFolder = folder1BaseDir.resolve("hotspot.py").toUri().toString();
+    // TODO should be removed when it's fixed on SLCORE
+    // https://sonarsource.atlassian.net/browse/SLCORE-396
+    Thread.sleep(2000);
+
     didOpen(uriInFolder, "python", "IP_ADDRESS = '12.34.56.78'\n");
 
     awaitUntilAsserted(() -> assertThat(client.getHotspots(uriInFolder))
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage,
         Diagnostic::getSeverity)
       .containsExactly(
+        // TODO source is not setting to diag
         tuple(0, 13, 0, 26, PYTHON_S1313, "remote", "Make sure using this hardcoded IP address \"12.34.56.78\" is safe here.",
           DiagnosticSeverity.Warning)));
   }
 
   @Test
-  void analysisConnected_find_tracked_hotspot_after_sq_10_1() {
+  void analysisConnected_find_tracked_hotspot_after_sq_10_1() throws InterruptedException {
     mockWebServerExtension.addStringResponse("/api/system/status", "{\"status\": \"UP\", \"version\": \"10.1\", \"id\": \"xzy\"}");
     mockNoIssueAndNoTaintInIncrementalSync();
     mockWebServerExtension.addProtobufResponse(
@@ -359,12 +381,17 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
     );
 
     var uriInFolder = folder1BaseDir.resolve("hotspot.py").toUri().toString();
+    // TODO should be removed when it's fixed on SLCORE
+    // https://sonarsource.atlassian.net/browse/SLCORE-396
+    Thread.sleep(2000);
+
     didOpen(uriInFolder, "python", "IP_ADDRESS = '12.34.56.78'\n");
 
     awaitUntilAsserted(() -> assertThat(client.getHotspots(uriInFolder))
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage,
         Diagnostic::getSeverity)
       .containsExactly(
+        // TODO source is not setting to diag
         tuple(0, 13, 0, 26, PYTHON_S1313, "remote", "Make sure using this hardcoded IP address \"12.34.56.78\" is safe here.",
           DiagnosticSeverity.Warning)));
   }
@@ -436,7 +463,7 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
   }
 
   @Test
-  void analysisConnected_no_matching_server_issues() {
+  void analysisConnected_no_matching_server_issues() throws InterruptedException {
     mockWebServerExtension.addStringResponse("/api/system/status", "{\"status\": \"UP\", \"version\": \"9.7\", \"id\": \"xzy\"}");
     mockNoIssuesNoHotspotsForProject();
     mockWebServerExtension.addStringResponse("/api/authentication/validate?format=json", "{\"valid\": true}");
@@ -473,8 +500,12 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
         .setQueryTimestamp(CURRENT_TIME)
         .build());
     var uriInFolder = folder1BaseDir.resolve("inFolder.py").toUri().toString();
-    didOpen(uriInFolder, "python", "def foo():\n  toto = 0\n  plouf = 0\n");
+    // TODO should be removed when it's fixed on SLCORE
+    // https://sonarsource.atlassian.net/browse/SLCORE-396
+    Thread.sleep(2000);
 
+    didOpen(uriInFolder, "python", "def foo():\n  toto = 0\n  plouf = 0\n");
+    // TODO analyzer_config.pb not found
     awaitUntilAsserted(() -> assertThat(client.getDiagnostics(uriInFolder))
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage,
         Diagnostic::getSeverity)
@@ -508,12 +539,33 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
             .build())
           .build())
         .build());
+    mockWebServerExtension.addProtobufResponse("/api/measures/component.protobuf?additionalFields=period&metricKeys=projects&component=myProject",
+      Measures.ComponentWsResponse.newBuilder()
+        .setComponent(Measures.Component.newBuilder()
+          .setKey("myProject")
+          .setQualifier("TRK")
+          .build())
+        .setPeriod(Measures.Period.newBuilder()
+          .setMode("PREVIOUS_VERSION")
+          .setDate("2023-08-29T09:37:59+0000")
+          .setParameter("9.2")
+          .build())
+        .build());
+    mockWebServerExtension.addProtobufResponse("/api/issues/search.protobuf?statuses=OPEN,CONFIRMED,REOPENED,RESOLVED&types=VULNERABILITY&componentKeys=myProject&rules=&branch=master&ps=500&p=1",
+      Issues.SearchWsResponse.newBuilder().addIssues(Issues.Issue.newBuilder().setKey("issueKey").build()).build());
+    mockWebServerExtension.addProtobufResponse("/api/issues/search.protobuf?statuses=OPEN,CONFIRMED,REOPENED,RESOLVED&types=VULNERABILITY&componentKeys=myProject&rules=&branch=master&ps=500&p=2",
+      Issues.SearchWsResponse.newBuilder().addComponents(Issues.Component.newBuilder().setKey("componentKey").setPath("componentPath").build()).build());
     lsProxy.didLocalBranchNameChange(new SonarLintExtendedLanguageServer.DidLocalBranchNameChangeParams(folder1BaseDir.toUri().toString()
       , "master"));
 
     var uriInFolder = folder1BaseDir.resolve("inFolder.py").toUri().toString();
+    // TODO should be removed when it's fixed on SLCORE
+    // https://sonarsource.atlassian.net/browse/SLCORE-396
+    Thread.sleep(2000);
+
     didOpen(uriInFolder, "python", "def foo():\n  toto = 0\n  plouf = 0\n");
 
+    // TODO analyzer_config.pb not found
     awaitUntilAsserted(() -> assertThat(client.getDiagnostics(uriInFolder))
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage,
         Diagnostic::getSeverity)
@@ -526,7 +578,7 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
     codeActionParams.setTextDocument(new TextDocumentIdentifier(uriInFolder));
     codeActionParams.setRange(firstDiagnostic.getRange());
     codeActionParams.setContext(new CodeActionContext(List.of(firstDiagnostic)));
-
+    // TODO if analyzer_config.pb is there (possible because of another test), then only 1 code action
     var codeActions = lsProxy.getTextDocumentService().codeAction(codeActionParams).get();
     assertThat(codeActions).hasSize(2)
       .extracting(Either::getRight)
@@ -717,7 +769,8 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
   }
 
   @Test
-  void shouldChangeIssueStatus() {
+  void shouldChangeIssueStatus() throws InterruptedException {
+    // TODO issue key is not found
     var issueKey = "qwerty";
     mockWebServerExtension.addProtobufResponseDelimited(
       "/batch/issues?key=myProject%3AchangeIssueStatus.py&branch=master",
@@ -739,6 +792,10 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
     lsProxy.didLocalBranchNameChange(new SonarLintExtendedLanguageServer.DidLocalBranchNameChangeParams(folder1BaseDir.toUri().toString(), "some/branch/name"));
     var fileUri = folder1BaseDir.resolve("changeIssueStatus.py").toUri().toString();
     var content = "def foo():\n  toto = 0\n  plouf = 0\n";
+    // TODO should be removed when it's fixed on SLCORE
+    // https://sonarsource.atlassian.net/browse/SLCORE-396
+    Thread.sleep(2000);
+
     didOpen(fileUri, "python", content);
 
     awaitUntilAsserted(() -> assertThat(client.getDiagnostics(fileUri))
@@ -794,7 +851,7 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
   }
 
   @Test
-  void change_hotspot_status_to_resolved() {
+  void change_hotspot_status_to_resolved() throws InterruptedException {
     var analyzedFileName = "hotspot_resolved.py";
 
     mockWebServerExtension.addStringResponse("/api/system/status", "{\"status\": \"UP\", \"version\": \"10.1\", \"id\": \"xzy\"}");
@@ -856,11 +913,16 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
 
 
     var uriInFolder = folder1BaseDir.resolve(analyzedFileName).toUri().toString();
+    // TODO should be removed when it's fixed on SLCORE
+    // https://sonarsource.atlassian.net/browse/SLCORE-396
+    Thread.sleep(2000);
+
     didOpen(uriInFolder, "python", "IP_ADDRESS = '12.34.56.78'\n");
 
     awaitUntilAsserted(() -> assertThat(client.getHotspots(uriInFolder))
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
       .containsExactly(
+        // TODO source is not setting to diag
         tuple(0, 13, 0, 26, PYTHON_S1313, "remote", "Make sure using this hardcoded IP address \"12.34.56.78\" is safe here.", DiagnosticSeverity.Warning)));
     assertThat(client.getHotspots(uriInFolder).get(0).getData().toString()).contains("\"status\":0");
 
@@ -944,11 +1006,16 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
 
 
     var uriInFolder = folder1BaseDir.resolve(analyzedFileName).toUri().toString();
+    // TODO should be removed when it's fixed on SLCORE
+    // https://sonarsource.atlassian.net/browse/SLCORE-396
+    Thread.sleep(2000);
+
     didOpen(uriInFolder, "python", "IP_ADDRESS = '12.34.56.78'\n");
 
     awaitUntilAsserted(() -> assertThat(client.getHotspots(uriInFolder))
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
       .containsExactly(
+        // TODO source is not setting to diag
         tuple(0, 13, 0, 26, PYTHON_S1313, "remote", "Make sure using this hardcoded IP address \"12.34.56.78\" is safe here.", DiagnosticSeverity.Warning)));
     assertThat(client.getHotspots(uriInFolder).get(0).getData().toString()).contains("\"status\":0");
 
@@ -1033,11 +1100,16 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
 
 
     var uriInFolder = folder1BaseDir.resolve(analyzedFileName).toUri().toString();
+    // TODO should be removed when it's fixed on SLCORE
+    // https://sonarsource.atlassian.net/browse/SLCORE-396
+    Thread.sleep(2000);
+
     didOpen(uriInFolder, "python", "IP_ADDRESS = '12.34.56.78'\n");
 
     awaitUntilAsserted(() -> assertThat(client.getHotspots(uriInFolder))
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
       .containsExactly(
+        // TODO source is not setting to diag
         tuple(0, 13, 0, 26, PYTHON_S1313, "remote", "Make sure using this hardcoded IP address \"12.34.56.78\" is safe here.", DiagnosticSeverity.Warning)));
 
 

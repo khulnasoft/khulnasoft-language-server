@@ -72,7 +72,7 @@ public final class ShowAllLocationsCommand {
     }
 
     public Param(ShowIssueParams showIssueParams, ProjectBindingManager projectBindingManager, String connectionId) {
-      this.fileUri = projectBindingManager.serverPathToFileUri(showIssueParams.getConfigurationScopeId()).orElse(null);
+      this.fileUri = projectBindingManager.serverPathToFileUri(showIssueParams.getIssueDetails().getServerRelativeFilePath()).orElse(null);
       this.message = showIssueParams.getIssueDetails().getMessage();
       this.severity = "";
       this.ruleKey = showIssueParams.getIssueDetails().getRuleKey();

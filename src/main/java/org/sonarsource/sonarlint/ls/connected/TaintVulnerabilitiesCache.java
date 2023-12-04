@@ -30,6 +30,7 @@ import java.util.stream.Stream;
 import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.DiagnosticSeverity;
 import org.sonarsource.sonarlint.ls.AnalysisScheduler;
+// TODO TaintIssue should be removed, we should use TaintVulnerabilityDto
 import org.sonarsource.sonarlint.ls.connected.domain.TaintIssue;
 import org.sonarsource.sonarlint.ls.util.Utils;
 
@@ -56,7 +57,7 @@ public class TaintVulnerabilitiesCache {
   }
 
   private static boolean hasSameKey(Diagnostic d, TaintIssue i) {
-    return d.getData() != null && d.getData().equals(i.getRuleKey());
+    return d.getData() != null && d.getData().equals(i.getId().toString());
   }
 
   private static boolean hasSameRuleKeyAndLocation(Diagnostic d, TaintIssue i) {
@@ -66,7 +67,7 @@ public class TaintVulnerabilitiesCache {
   public Optional<TaintIssue> getTaintVulnerabilityByKey(String issueId) {
     return taintVulnerabilitiesPerFile.values().stream()
       .flatMap(List::stream)
-      .filter(i -> issueId.equals(i.getRuleKey()))
+      .filter(i -> issueId.equals(i.getId().toString()))
       .findFirst();
   }
 
@@ -88,7 +89,7 @@ public class TaintVulnerabilitiesCache {
       diagnostic.setCode(issue.getRuleKey());
       diagnostic.setMessage(message(issue));
       diagnostic.setSource(issue.getSource());
-      diagnostic.setData(issue.getRuleKey());
+      diagnostic.setData(issue.getId().toString());
 
       return Optional.of(diagnostic);
     }
@@ -113,7 +114,7 @@ public class TaintVulnerabilitiesCache {
     var fileUri = URI.create(fileUriStr);
     var issues = taintVulnerabilitiesPerFile.get(fileUri);
     if (issues != null) {
-      var issueToRemove = issues.stream().filter(taintIssue -> taintIssue.getRuleKey().equals(key)).findFirst();
+      var issueToRemove = issues.stream().filter(taintIssue -> taintIssue.getId().toString().equals(key)).findFirst();
       issueToRemove.ifPresent(issues::remove);
     }
   }

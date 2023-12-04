@@ -190,6 +190,21 @@ public class DiagnosticPublisher {
     var localDiagnostics = localIssues.entrySet()
       .stream()
       .map(this::convert);
+    // TODO get taints from the backend
+    // initializedBackend().getTaintVulnerabilityTrackingService().listAll(new ListAllParams(folderUri))
+//    var folderWrapperOptional = workspaceFoldersManager.findFolderForFile(uri);
+//    if (folderWrapperOptional.isPresent()) {
+//      var folderUri = folderWrapperOptional.get().getUri().toString();
+//      try {
+//        var taints = backendServiceFacade.listAllTaints(folderUri).get();
+//
+//      } catch (InterruptedException e) {
+//        throw new RuntimeException(e);
+//      } catch (ExecutionException e) {
+//        throw new RuntimeException(e);
+//      }
+//    }
+
     var taintDiagnostics = taintVulnerabilitiesCache.getAsDiagnostics(newUri, focusOnNewCode);
 
     var diagnosticList = Stream.concat(localDiagnostics, taintDiagnostics)

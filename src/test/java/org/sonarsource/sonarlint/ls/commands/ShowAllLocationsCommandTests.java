@@ -133,8 +133,8 @@ class ShowAllLocationsCommandTests {
     var showIssueParams = new ShowIssueParams("connectionId", new IssueDetailsDto(textRangeDto,  "rule:S1234",
       "issueKey", "/src/java/main/myFile.py", "branch", "pr", "this is wrong",
       "29.09.2023", "print('1234')", false, List.of()));
-
-    when(projectBindingManager.serverPathToFileUri(showIssueParams.getIssueDetails().getServerRelativeFilePath())).thenReturn(Optional.of(fileInAWorkspaceFolderPath.toUri()));
+    when(projectBindingManager.serverPathToFileUri(showIssueParams.getIssueDetails().getServerRelativeFilePath()))
+      .thenReturn(Optional.of(fileInAWorkspaceFolderPath.toUri()));
 
     var result = new ShowAllLocationsCommand.Param(showIssueParams, projectBindingManager, "connectionId");
 

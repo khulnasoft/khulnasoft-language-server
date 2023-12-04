@@ -516,6 +516,7 @@ public class AnalysisTaskExecutor {
       engine.getPluginDetails(),
       () -> filesToAnalyze.forEach((fileUri, openFile) -> {
         var issues = issuesPerFiles.getOrDefault(fileUri, List.of());
+        // TODO path computation should be performed on SLCORE side
         var filePath = FileUtils.toSonarQubePath(binding.toServerRelativePath(FileUtils.getFileRelativePath(baseDir, fileUri, logOutput)));
         serverIssueTracker.matchAndTrack(filePath, issues, issueListener, task.shouldFetchServerIssues());
       }));

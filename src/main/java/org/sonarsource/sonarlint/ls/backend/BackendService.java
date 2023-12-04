@@ -77,6 +77,8 @@ import org.sonarsource.sonarlint.core.clientapi.backend.rules.StandaloneRuleConf
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.rules.UpdateStandaloneRulesConfigurationParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.telemetry.GetStatusResponse;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.telemetry.TelemetryRpcService;
+import org.sonarsource.sonarlint.core.rpc.protocol.backend.tracking.ListAllParams;
+import org.sonarsource.sonarlint.core.rpc.protocol.backend.tracking.ListAllResponse;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.tracking.TrackWithServerIssuesParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.tracking.TrackWithServerIssuesResponse;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.binding.GetBindingSuggestionsResponse;
@@ -330,5 +332,9 @@ public class BackendService {
 
   public CompletableFuture<GetAllProjectsResponse> getAllProjects(Either<TransientSonarQubeConnectionDto, TransientSonarCloudConnectionDto> transientConnection) {
     return initializedBackend().getConnectionService().getAllProjects(new GetAllProjectsParams(transientConnection));
+  }
+
+  public CompletableFuture<ListAllResponse> listAllTaints(String folderUri) {
+    return initializedBackend().getTaintVulnerabilityTrackingService().listAll(new ListAllParams(folderUri));
   }
 }

@@ -86,7 +86,7 @@ public class TaintIssuesUpdater {
       logOutput.info(format("Fetched %s %s from %s", foundVulnerabilities,
         pluralize(foundVulnerabilities, "vulnerability", "vulnerabilities"), connectionId));
     }
-    diagnosticPublisher.publishDiagnostics(fileUri, false);
+
   }
 
   public void shutdown() {

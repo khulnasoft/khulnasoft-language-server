@@ -23,6 +23,7 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.UUID;
 import java.util.stream.Stream;
 import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.DiagnosticSeverity;
@@ -50,6 +51,7 @@ class TaintVulnerabilitiesCacheTests {
   private static final String SAMPLE_SECURITY_RULE_KEY = "javasecurity:S12345";
   private final TaintVulnerabilitiesCache underTest = new TaintVulnerabilitiesCache();
 
+  // TODO should use TaintVulnerabilityDto
 //  @ParameterizedTest
 //  @MethodSource("testIssueConversionParameters")
 //  void testIssueConversion(String taintSource, boolean isOnNewCode, boolean focusOnNewCode, DiagnosticSeverity expectedSeverity) {
@@ -62,10 +64,11 @@ class TaintVulnerabilitiesCacheTests {
 //    when(issue.getSeverity()).thenReturn(IssueSeverity.BLOCKER);
 //    when(issue.getRuleKey()).thenReturn("ruleKey");
 //    when(issue.getMessage()).thenReturn("message");
-//    when(issue.getKey()).thenReturn("issueKey");
+//    when(issue.getSonarServerKey()).thenReturn("issueKey");
 //    when(issue.getFlows()).thenReturn(List.of(flow));
 //    when(issue.getSource()).thenReturn(taintSource);
-//    when(issue.isOnNewCode()).thenReturn(isOnNewCode);
+//    //
+//    //when(issue.getCleanCodeAttribute().get().getAttributeCategory()).thenReturn(isOnNewCode);
 //
 //    var diagnostic = convert(issue, focusOnNewCode).get();
 //
@@ -131,12 +134,14 @@ class TaintVulnerabilitiesCacheTests {
   void testGetServerIssueForDiagnosticBasedOnKey() throws Exception {
     var uri = new URI("/");
     var issue = mock(TaintIssue.class);
-    when(issue.getRuleKey()).thenReturn("issueKey");
+    var issueId = UUID.randomUUID();
+    when(issue.getId()).thenReturn(issueId);
     when(issue.getRuleKey()).thenReturn(SAMPLE_SECURITY_RULE_KEY);
     when(issue.isResolved()).thenReturn(false);
 
     var diagnostic = mock(Diagnostic.class);
-    when(diagnostic.getData()).thenReturn("issueKey");
+    when(diagnostic.getData()).thenReturn(issueId.toString());
+    when(diagnostic.getCode()).thenReturn(Either.forLeft(""));
     underTest.reload(uri, List.of(issue));
 
     assertThat(underTest.getTaintVulnerabilityForDiagnostic(uri, diagnostic)).hasValue(issue);
@@ -161,14 +166,14 @@ class TaintVulnerabilitiesCacheTests {
   void testGetServerIssueByKey() throws Exception {
     var uri = new URI("/");
     var issue = mock(TaintIssue.class);
-    var issueKey = "key";
-    when(issue.getRuleKey()).thenReturn(issueKey);
+    var issueId = UUID.randomUUID();
+    when(issue.getId()).thenReturn(issueId);
     when(issue.getRuleKey()).thenReturn(SAMPLE_SECURITY_RULE_KEY);
     when(issue.isResolved()).thenReturn(false);
 
     underTest.reload(uri, List.of(issue));
 
-    assertThat(underTest.getTaintVulnerabilityByKey(issueKey)).hasValue(issue);
+    assertThat(underTest.getTaintVulnerabilityByKey(issueId.toString())).hasValue(issue);
     assertThat(underTest.getTaintVulnerabilityByKey("otherKey")).isEmpty();
   }
 
@@ -176,16 +181,16 @@ class TaintVulnerabilitiesCacheTests {
   void testRemoveTaintIssue() throws Exception {
     var uri = new URI("/");
     var issue = mock(TaintIssue.class);
-    var issueKey = "key";
-    when(issue.getRuleKey()).thenReturn(issueKey);
+    var issueId = UUID.randomUUID();
+    when(issue.getId()).thenReturn(issueId);
     when(issue.getRuleKey()).thenReturn(SAMPLE_SECURITY_RULE_KEY);
     when(issue.isResolved()).thenReturn(false);
 
     underTest.getTaintVulnerabilitiesPerFile().put(uri,  new ArrayList<>(Arrays.asList(issue)));
-    assertThat(underTest.getTaintVulnerabilityByKey(issueKey)).hasValue(issue);
+    assertThat(underTest.getTaintVulnerabilityByKey(issueId.toString())).hasValue(issue);
 
-    underTest.removeTaintIssue(uri.toString(), issueKey);
-    assertThat(underTest.getTaintVulnerabilityByKey(issueKey)).isEmpty();
+    underTest.removeTaintIssue(uri.toString(), issueId.toString());
+    assertThat(underTest.getTaintVulnerabilityByKey(issueId.toString())).isEmpty();
 
 
   }

@@ -34,6 +34,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 import org.assertj.core.api.Assertions;
+import org.eclipse.lsp4j.ShowMessageRequestParams;
 import org.eclipse.lsp4j.jsonrpc.CancelChecker;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -186,10 +187,12 @@ class SonarLintVSCodeClientTests {
   void shouldSuggestBinding() {
     var suggestions = new HashMap<String, List<BindingSuggestionDto>>();
     suggestions.put("key", Collections.emptyList());
-    var params = new SuggestBindingParams(suggestions);
+
     underTest.suggestBinding(suggestions);
 
-    verify(client).suggestBinding(params);
+    var captor = ArgumentCaptor.forClass(SuggestBindingParams.class);
+    verify(client).suggestBinding(captor.capture());
+    assertThat(captor.getValue().getSuggestions()).isEqualTo(suggestions);
   }
 
   @Test

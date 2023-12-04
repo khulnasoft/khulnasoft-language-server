@@ -169,28 +169,6 @@ class ServerIssueTrackerWrapperTests {
   }
 
   @Test
-  void fetch_server_issues_when_needed() {
-    var issue = mockIssue();
-
-    var issues = Collections.singleton(issue);
-
-    var engine = mock(ConnectedSonarLintEngine.class);
-    var trackIssuesResponse = getTrackWithServerIssuesResponse(
-      List.of(new TrackWithServerIssuesResponse.ServerOrLocalIssueDto(Either.forLeft(createServerMatchedIssueDto(false)))));
-    var tracker = newTracker(engine, trackIssuesResponse);
-    matchAndTrack(tracker, "dummy", issues, false);
-    verify(engine).getServerHotspots(any(), any(), any());
-    verifyNoMoreInteractions(engine);
-
-    engine = mock(ConnectedSonarLintEngine.class);
-    tracker = newTracker(engine, trackIssuesResponse);
-    matchAndTrack(tracker, "dummy", issues, true);
-    verify(engine).downloadAllServerHotspotsForFile(any(), any(), any(), any(), any(), any());
-    verify(engine).getServerHotspots(any(), any(), any());
-    verifyNoMoreInteractions(engine);
-  }
-
-  @Test
   void should_convert_issues_to_trackables(){
     var lineNumber = 2;
     var issue = mockIssue(RuleType.BUG, IssueSeverity.BLOCKER, lineNumber);

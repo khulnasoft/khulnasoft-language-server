@@ -99,6 +99,7 @@ public class ServerIssueTrackerWrapper {
     cachingIssueTracker.matchAndTrackAsNew(filePath, issueTrackables);
     cachingHotspotsTracker.matchAndTrackAsNew(filePath, toHotspotTrackables(issues));
 
+    // TODO call backend IssueTrackingService.trackWithServerIssues() or another method for hostspots in HotspotTrackingService
     if (shouldFetchServerIssues) {
       tracker.update(engine, projectBinding, getReferenceBranchNameForFolder.get(), Collections.singleton(filePath));
     } else {

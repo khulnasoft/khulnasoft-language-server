@@ -83,6 +83,7 @@ class UtilsTests {
 
   @Test
   void valueOfTitleTest() {
+    // TODO Hotspots titles should be moved to shared module in the SLCORE
     AssertionsForClassTypes.assertThat(hotspotStatusOfTitle("To Review")).isEqualTo(HotspotStatus.TO_REVIEW);
     AssertionsForClassTypes.assertThat(hotspotStatusOfTitle("Safe")).isEqualTo(HotspotStatus.SAFE);
     AssertionsForClassTypes.assertThat(hotspotStatusOfTitle("Fixed")).isEqualTo(HotspotStatus.FIXED);

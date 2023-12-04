@@ -244,7 +244,8 @@ class ProjectBindingManagerTests {
     when(settingsManager.getCurrentDefaultFolderSettings()).thenReturn(BOUND_SETTINGS);
     servers.put(CONNECTION_ID, GLOBAL_SETTINGS);
 
-    when(fakeEngine.calculatePathPrefixes(eq(PROJECT_KEY), any())).thenReturn(FAKE_BINDING);
+    when(backendServiceFacade.getPathWithTranslation(anotherFolderPath.toUri().toString()))
+      .thenReturn(CompletableFuture.completedFuture(new GetPathTranslationResponse("idePrefix", "sqPrefix")));
 
     var binding = underTest.getBinding(fileNotInAWorkspaceFolderPath.toUri());
     assertThat(binding).isNotEmpty();
@@ -252,9 +253,9 @@ class ProjectBindingManagerTests {
     assertThat(binding.get().getEngine()).isEqualTo(fakeEngine);
     assertThat(binding.get().getConnectionId()).isEqualTo(CONNECTION_ID);
     assertThat(binding.get().getServerIssueTracker()).isNotNull();
-    assertThat(binding.get().getBinding().equals(FAKE_BINDING)).isTrue();
+    assertThat(binding.get().getBinding()).isEqualTo(FAKE_BINDING);
 
-    //verify(fakeEngine).calculatePathPrefixes(eq(PROJECT_KEY), argThat(set -> set.contains(FILE_PHP)));
+    verify(backendServiceFacade).getPathWithTranslation(anotherFolderPath.toUri().toString());
   }
 
   @Test
