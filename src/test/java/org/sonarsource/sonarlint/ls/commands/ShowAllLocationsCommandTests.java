@@ -131,10 +131,8 @@ class ShowAllLocationsCommandTests {
   void shouldBuildCommandParamsFromShowIssueParams() {
     var textRangeDto = new TextRangeDto(1, 0, 1, 13);
     var showIssueParams = new ShowIssueParams("connectionId", new IssueDetailsDto(textRangeDto,  "rule:S1234",
-      "issueKey", "/src/java/main/myFile.py", "branch", "pr", "this is wrong",
+      "issueKey", Path.of("/src/java/main/myFile.py"), "branch", "pr", "this is wrong",
       "29.09.2023", "print('1234')", false, List.of()));
-    when(projectBindingManager.serverPathToFileUri(showIssueParams.getIssueDetails().getServerRelativeFilePath()))
-      .thenReturn(Optional.of(fileInAWorkspaceFolderPath.toUri()));
 
     var result = new ShowAllLocationsCommand.Param(showIssueParams, projectBindingManager, "connectionId");
 
@@ -145,13 +143,11 @@ class ShowAllLocationsCommandTests {
   void shouldBuildCommandParamsFromShowIssueParamsForFileLevelIssue() {
     var textRangeDto = new TextRangeDto(0, 0, 0, 0);
     var showIssueParams = new ShowIssueParams("connectionId", new IssueDetailsDto(textRangeDto, "rule:S1234",
-      "issueKey", "/src/java/main/myFile.py", "branch", null, "this is wrong",
+      "issueKey", Path.of("/src/java/main/myFile.py"), "branch", null, "this is wrong",
       "29.09.2023", """
       print('1234')
       print('aa')
       print('b')""", false, List.of()));
-
-    when(projectBindingManager.serverPathToFileUri(showIssueParams.getIssueDetails().getServerRelativeFilePath())).thenReturn(Optional.of(fileInAWorkspaceFolderPath.toUri()));
 
     var result = new ShowAllLocationsCommand.Param(showIssueParams, projectBindingManager, "connectionId");
 
@@ -162,10 +158,8 @@ class ShowAllLocationsCommandTests {
   void shouldBuildCommandParamsFromShowIssueParamsForInvalidTextRange() {
     var textRangeDto = new TextRangeDto(-1, 0, -2, 0);
     var showIssueParams = new ShowIssueParams("connectionId", new IssueDetailsDto(textRangeDto,  "rule:S1234",
-      "issueKey", "/src/java/main/myFile.py", "bb", "1234", "this is wrong",
+      "issueKey", Path.of("/src/java/main/myFile.py"), "bb", "1234", "this is wrong",
       "29.09.2023", "print('1234')", false, List.of()));
-
-    when(projectBindingManager.serverPathToFileUri(showIssueParams.getIssueDetails().getServerRelativeFilePath())).thenReturn(Optional.of(fileInAWorkspaceFolderPath.toUri()));
 
     var result = new ShowAllLocationsCommand.Param(showIssueParams, projectBindingManager, "connectionId");
 
@@ -182,10 +176,8 @@ class ShowAllLocationsCommandTests {
     var flow = new FlowDto(List.of(location1, location2));
 
     var showIssueParams = new ShowIssueParams("connectionId", new IssueDetailsDto(textRangeDto1,  "rule:S1234",
-      "issueKey", "/src/java/main/myFile.py", "main", "", "this is wrong", "29.09.2023",
+      "issueKey", Path.of("/src/java/main/myFile.py"), "main", "", "this is wrong", "29.09.2023",
       "print('1234')", false, List.of(flow)));
-
-    when(projectBindingManager.serverPathToFileUri(showIssueParams.getIssueDetails().getServerRelativeFilePath())).thenReturn(Optional.of(fileInAWorkspaceFolderPath.toUri()));
 
     var result = new ShowAllLocationsCommand.Param(showIssueParams, projectBindingManager, "connectionId");
 
@@ -223,7 +215,7 @@ class ShowAllLocationsCommandTests {
 
     var connectionId = "connectionId";
 
-    var param = new ShowAllLocationsCommand.Param(issue, connectionId, ShowAllLocationsCommandTests::resolvePath, cache);
+    var param = new ShowAllLocationsCommand.Param(issue, connectionId, cache);
 
     assertThat(param.getConnectionId()).isEqualTo(connectionId);
     assertThat(param.getCreationDate()).isEqualTo("1970-01-01T00:00:00Z");
@@ -242,11 +234,4 @@ class ShowAllLocationsCommandTests {
     assertThat(secondLocation.getCodeMatches()).isFalse();
   }
 
-  private static Optional<URI> resolvePath(String s) {
-    try {
-      return Optional.of(Paths.get(s).toUri());
-    } catch (InvalidPathException e) {
-      return Optional.empty();
-    }
-  }
 }

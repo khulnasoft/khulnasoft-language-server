@@ -26,9 +26,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.sonarsource.sonarlint.core.ConfigurationService;
 import org.sonarsource.sonarlint.core.client.api.connected.ConnectedSonarLintEngine;
-import org.sonarsource.sonarlint.core.hotspot.HotspotService;
 import org.sonarsource.sonarlint.core.rpc.protocol.SonarLintRpcServer;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.branch.DidChangeActiveSonarProjectBranchParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.branch.DidVcsRepositoryChangeParams;
@@ -37,9 +35,8 @@ import org.sonarsource.sonarlint.core.rpc.protocol.backend.config.ConfigurationR
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.config.binding.DidUpdateBindingParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.hotspot.HotspotRpcService;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.hotspot.OpenHotspotInBrowserParams;
-import org.sonarsource.sonarlint.core.serverconnection.ProjectBinding;
 import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageClient;
-import org.sonarsource.sonarlint.ls.connected.ProjectBindingWrapper;
+import org.sonarsource.sonarlint.ls.connected.ProjectBinding;
 import org.sonarsource.sonarlint.ls.connected.ServerIssueTrackerWrapper;
 import org.sonarsource.sonarlint.ls.log.LanguageClientLogger;
 
@@ -90,8 +87,8 @@ class BackendServiceTests {
   void getConfigScopeDtoWithBinding() {
     var workspaceUri = "/workspace";
     var connectionId = "connectionId";
-    var binding = mock(ProjectBinding.class);
-    var bindingWrapper = new ProjectBindingWrapper(connectionId, binding, mock(ConnectedSonarLintEngine.class), mock(ServerIssueTrackerWrapper.class));
+    var binding = mock(org.sonarsource.sonarlint.core.serverconnection.ProjectBinding.class);
+    var bindingWrapper = new ProjectBinding(connectionId,"projectKey", mock(ConnectedSonarLintEngine.class), mock(ServerIssueTrackerWrapper.class));
     var result = underTest.getConfigScopeDto(new WorkspaceFolder(workspaceUri), Optional.of(bindingWrapper));
 
     assertThat(result.getId()).isEqualTo(workspaceUri);

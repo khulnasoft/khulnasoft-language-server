@@ -263,8 +263,8 @@ class ServerIssueTrackerWrapperTests {
     when(workspaceFoldersManager.findFolderForFile(any())).thenReturn(Optional.of(workspaceFolderWrapper));
     when(workspaceSettings.isFocusOnNewCode()).thenReturn(true);
     when(settingsManager.getCurrentSettings()).thenReturn(workspaceSettings);
-    return new ServerIssueTrackerWrapper(engine, new EndpointParams("https://sonarcloud.io", true, "known"), projectBinding,
-      branchSupplier, backendServiceFacade, workspaceFoldersManager, logTester.getLogger());
+    return new ServerIssueTrackerWrapper(engine, new EndpointParams("https://sonarcloud.io", true, "known"),
+      projectKey, branchSupplier, backendServiceFacade, workspaceFoldersManager, logTester.getLogger());
   }
 
   // create uniquely identifiable issue
@@ -325,7 +325,7 @@ class ServerIssueTrackerWrapperTests {
 
   @NotNull
   private static CompletableFuture<TrackWithServerIssuesResponse> getTrackWithServerIssuesResponse(List<Either<ServerMatchedIssueDto, LocalOnlyIssueDto>> issuesInResponse) {
-    return CompletableFuture.completedFuture(new TrackWithServerIssuesResponse(Map.of("dummy", issuesInResponse)));
+    return CompletableFuture.completedFuture(new TrackWithServerIssuesResponse(Map.of(Path.of("dummy"), issuesInResponse)));
   }
 
   @NotNull

@@ -30,7 +30,7 @@ import org.sonarsource.sonarlint.core.analysis.api.ClientModuleFileEvent;
 import org.sonarsource.sonarlint.core.analysis.api.ClientModuleInfo;
 import org.sonarsource.sonarlint.core.client.api.common.SonarLintEngine;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingManager;
-import org.sonarsource.sonarlint.ls.connected.ProjectBindingWrapper;
+import org.sonarsource.sonarlint.ls.connected.ProjectBinding;
 import org.sonarsource.sonarlint.ls.file.FileTypeClassifier;
 import org.sonarsource.sonarlint.ls.file.FolderFileSystem;
 import org.sonarsource.sonarlint.ls.java.JavaConfigCache;
@@ -98,7 +98,7 @@ public class ModuleEventsProcessor implements WorkspaceFolderLifecycleListener {
 
   private SonarLintEngine findEngineFor(WorkspaceFolderWrapper folder) {
     return bindingManager.getBinding(folder)
-      .map(ProjectBindingWrapper::getEngine)
+      .map(ProjectBinding::getEngine)
       .map(SonarLintEngine.class::cast)
       .orElseGet(standaloneEngineManager::getOrCreateStandaloneEngine);
   }

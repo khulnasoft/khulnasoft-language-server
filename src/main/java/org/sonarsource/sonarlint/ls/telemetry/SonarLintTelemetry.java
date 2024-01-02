@@ -43,17 +43,17 @@ public class SonarLintTelemetry implements WorkspaceSettingsChangeListener {
   }
 
   private void optOut(boolean optOut) {
-    backendServiceFacade.getTelemetryStatus()
+    backendServiceFacade.getBackendService().getTelemetryStatus()
       .thenAccept(status -> {
         if (optOut) {
           if (status.isEnabled()) {
             logOutput.debug("Disabling telemetry");
-            backendServiceFacade.disableTelemetry();
+            backendServiceFacade.getBackendService().disableTelemetry();
           }
         } else {
           if (!status.isEnabled()) {
             logOutput.debug("Enabling telemetry");
-            backendServiceFacade.enableTelemetry();
+            backendServiceFacade.getBackendService().enableTelemetry();
           }
         }
       });
@@ -65,50 +65,50 @@ public class SonarLintTelemetry implements WorkspaceSettingsChangeListener {
 
   public void analysisDoneOnMultipleFiles() {
     if (enabled()) {
-      backendServiceFacade.getTelemetryService().analysisDoneOnMultipleFiles();
+      backendServiceFacade.getBackendService().getTelemetryService().analysisDoneOnMultipleFiles();
     }
   }
 
   public void analysisDoneOnSingleLanguage(Language language, int analysisTimeMs) {
     if (enabled()) {
-      backendServiceFacade.getTelemetryService()
+      backendServiceFacade.getBackendService().getTelemetryService()
         .analysisDoneOnSingleLanguage(new AnalysisDoneOnSingleLanguageParams(org.sonarsource.sonarlint.core.rpc.protocol.common.Language.valueOf(language.name()), analysisTimeMs));
     }
   }
 
   public void addReportedRules(Set<String> ruleKeys) {
     if (enabled()) {
-      backendServiceFacade.getTelemetryService().addReportedRules(new AddReportedRulesParams(ruleKeys));
+      backendServiceFacade.getBackendService().getTelemetryService().addReportedRules(new AddReportedRulesParams(ruleKeys));
     }
   }
 
   public void devNotificationsClicked(String eventType) {
     if (enabled()) {
-      backendServiceFacade.getTelemetryService().devNotificationsClicked(new DevNotificationsClickedParams(eventType));
+      backendServiceFacade.getBackendService().getTelemetryService().devNotificationsClicked(new DevNotificationsClickedParams(eventType));
     }
   }
 
   public void taintVulnerabilitiesInvestigatedLocally() {
     if (enabled()) {
-      backendServiceFacade.getTelemetryService().taintVulnerabilitiesInvestigatedLocally();
+      backendServiceFacade.getBackendService().getTelemetryService().taintVulnerabilitiesInvestigatedLocally();
     }
   }
 
   public void taintVulnerabilitiesInvestigatedRemotely() {
     if (enabled()) {
-      backendServiceFacade.getTelemetryService().taintVulnerabilitiesInvestigatedRemotely();
+      backendServiceFacade.getBackendService().getTelemetryService().taintVulnerabilitiesInvestigatedRemotely();
     }
   }
 
   public void addQuickFixAppliedForRule(String ruleKey) {
     if (enabled()) {
-      backendServiceFacade.getTelemetryService().addQuickFixAppliedForRule(new AddQuickFixAppliedForRuleParams(ruleKey));
+      backendServiceFacade.getBackendService().getTelemetryService().addQuickFixAppliedForRule(new AddQuickFixAppliedForRuleParams(ruleKey));
     }
   }
 
   public void helpAndFeedbackLinkClicked(String itemId) {
     if (enabled()) {
-      backendServiceFacade.getTelemetryService().helpAndFeedbackLinkClicked(new HelpAndFeedbackClickedParams(itemId));
+      backendServiceFacade.getBackendService().getTelemetryService().helpAndFeedbackLinkClicked(new HelpAndFeedbackClickedParams(itemId));
     }
   }
 

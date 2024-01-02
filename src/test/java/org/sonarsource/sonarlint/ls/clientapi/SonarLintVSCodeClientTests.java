@@ -34,7 +34,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 import org.assertj.core.api.Assertions;
-import org.eclipse.lsp4j.ShowMessageRequestParams;
 import org.eclipse.lsp4j.jsonrpc.CancelChecker;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -62,11 +61,10 @@ import org.sonarsource.sonarlint.core.rpc.protocol.client.message.ShowSoonUnsupp
 import org.sonarsource.sonarlint.core.rpc.protocol.client.smartnotification.ShowSmartNotificationParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.sync.DidSynchronizeConfigurationScopeParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.common.TextRangeDto;
-import org.sonarsource.sonarlint.core.serverconnection.ProjectBinding;
 import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageClient;
 import org.sonarsource.sonarlint.ls.commands.ShowAllLocationsCommand;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingManager;
-import org.sonarsource.sonarlint.ls.connected.ProjectBindingWrapper;
+import org.sonarsource.sonarlint.ls.connected.ProjectBinding;
 import org.sonarsource.sonarlint.ls.connected.ServerIssueTrackerWrapper;
 import org.sonarsource.sonarlint.ls.connected.api.RequestsHandlerServer;
 import org.sonarsource.sonarlint.ls.connected.events.ServerSentEventsHandlerService;
@@ -95,7 +93,7 @@ class SonarLintVSCodeClientTests {
   SonarLintLogTester logTester = new SonarLintLogTester();
   private Path workspaceFolderPath;
   private Path fileInAWorkspaceFolderPath;
-  private final String FILE_PYTHON = "myFile.py";
+  private final Path FILE_PYTHON = Path.of("myFile.py");
   SonarLintExtendedLanguageClient client = mock(SonarLintExtendedLanguageClient.class);
   SettingsManager settingsManager = mock(SettingsManager.class);
   SmartNotifications smartNotifications = mock(SmartNotifications.class);
@@ -105,7 +103,7 @@ class SonarLintVSCodeClientTests {
   ServerSentEventsHandlerService serverSentEventsHandlerService = mock(ServerSentEventsHandlerService.class);
   @Captor
   ArgumentCaptor<ShowAllLocationsCommand.Param> paramCaptor;
-  ProjectBinding binding = mock(ProjectBinding.class);
+  org.sonarsource.sonarlint.core.serverconnection.ProjectBinding binding = mock(org.sonarsource.sonarlint.core.serverconnection.ProjectBinding.class);
   ConnectedSonarLintEngine engine = mock(ConnectedSonarLintEngine.class);
   ServerIssueTrackerWrapper serverIssueTrackerWrapper = mock(ServerIssueTrackerWrapper.class);
 
@@ -299,7 +297,7 @@ class SonarLintVSCodeClientTests {
   void shouldCallClientShowHotspot() {
     var hotspotDetailsDto = new HotspotDetailsDto("key1",
       "message1",
-      "myfolder/myFile",
+      Path.of("myfolder/myFile"),
       null,
       null,
       "TO_REVIEW",
@@ -384,15 +382,13 @@ class SonarLintVSCodeClientTests {
   void shouldForwardOpenIssueRequest() {
     var fileUri = fileInAWorkspaceFolderPath.toUri();
     var textRangeDto = new TextRangeDto(1, 2, 3, 4);
-    var issueDetailsDto = new IssueDetailsDto(textRangeDto, "connectionId", "rule:S1234",
-      "issueKey", FILE_PYTHON, "this is wrong", "29.09.2023", "print('ddd')",
-      "", false, List.of());
+    var issueDetailsDto = new IssueDetailsDto(textRangeDto, "rule:S1234",
+      "issueKey", FILE_PYTHON, "branch", "PR", "this is wrong",
+      "29.09.2023", "print('ddd')", false, List.of());
     var showIssueParams = new ShowIssueParams(fileUri.toString(), issueDetailsDto);
 
-    when(bindingManager.serverPathToFileUri(showIssueParams.getConfigurationScopeId()))
-      .thenReturn(Optional.of(fileUri));
     when(bindingManager.getBinding(fileUri))
-      .thenReturn(Optional.of(new ProjectBindingWrapper("connectionId", binding, engine, serverIssueTrackerWrapper)));
+      .thenReturn(Optional.of(new ProjectBinding("connectionId", "projectKey", engine, serverIssueTrackerWrapper)));
 
     underTest.showIssue(fileUri.toString(), issueDetailsDto);
     verify(client).showIssue(paramCaptor.capture());
@@ -412,10 +408,7 @@ class SonarLintVSCodeClientTests {
     var issueDetailsDto = new IssueDetailsDto(textRangeDto, "rule:S1234",
       "issueKey", FILE_PYTHON, "bb", null, "this is wrong", "29.09.2023", "print('ddd')",
       false, List.of());
-    var showIssueParams = new ShowIssueParams(fileUri.toString(), issueDetailsDto);
 
-    when(bindingManager.serverPathToFileUri(showIssueParams.getConfigurationScopeId()))
-      .thenReturn(Optional.of(fileUri));
     when(bindingManager.getBinding(fileUri))
       .thenReturn(Optional.empty());
 

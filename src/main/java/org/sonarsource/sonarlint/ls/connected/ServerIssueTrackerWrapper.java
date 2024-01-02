@@ -21,6 +21,7 @@ package org.sonarsource.sonarlint.ls.connected;
 
 import com.google.common.collect.Streams;
 import java.net.URI;
+import java.nio.file.Path;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -61,7 +62,6 @@ public class ServerIssueTrackerWrapper {
 
   private final ConnectedSonarLintEngine engine;
   private final EndpointParams endpointParams;
-  private final ProjectBinding projectBinding;
   private final Supplier<String> getReferenceBranchNameForFolder;
   private final BackendServiceFacade backend;
   private final LanguageClientLogOutput logOutput;
@@ -71,13 +71,14 @@ public class ServerIssueTrackerWrapper {
   private final IssueTrackerCache<Issue> hotspotsTrackerCache;
   private final CachingIssueTracker cachingIssueTracker;
   private final CachingIssueTracker cachingHotspotsTracker;
+  private final String projectKey;
 
   ServerIssueTrackerWrapper(ConnectedSonarLintEngine engine, EndpointParams endpointParams,
-    ProjectBinding projectBinding, Supplier<String> getReferenceBranchNameForFolder,
+    String projectKey, Supplier<String> getReferenceBranchNameForFolder,
     BackendServiceFacade backend, WorkspaceFoldersManager workspaceFoldersManager, LanguageClientLogOutput logOutput) {
     this.engine = engine;
     this.endpointParams = endpointParams;
-    this.projectBinding = projectBinding;
+    this.projectKey = projectKey;
     this.getReferenceBranchNameForFolder = getReferenceBranchNameForFolder;
     this.workspaceFoldersManager = workspaceFoldersManager;
     this.backend = backend;
@@ -120,13 +121,13 @@ public class ServerIssueTrackerWrapper {
     ), logOutput);
     trackWithServerIssuesResponse.ifPresentOrElse(
       // TODO migrate to new DTO
-      r -> matchAndTrackIssues(filePath, issueListener, issueTrackables, r.getIssuesByServerRelativePath()),
+      r -> matchAndTrackIssues(Path.of(filePath), issueListener, issueTrackables, r.getIssuesByServerRelativePath()),
       () -> issueTrackables.stream().map(DelegatingIssue::new).forEach(issueListener::handle)
     );
   }
 
-  private static void matchAndTrackIssues(String filePath, IssueListener issueListener, Collection<Trackable> currentTrackables,
-    Map<String, List<Either<ServerMatchedIssueDto, LocalOnlyIssueDto>>> issuesByServerRelativePath) {
+  private static void matchAndTrackIssues(Path filePath, IssueListener issueListener, Collection<Trackable> currentTrackables,
+    Map<Path, List<Either<ServerMatchedIssueDto, LocalOnlyIssueDto>>> issuesByServerRelativePath) {
     //
     var eitherList = issuesByServerRelativePath.getOrDefault(filePath, Collections.emptyList());
     Streams.zip(currentTrackables.stream(), eitherList.stream(), (issue, either) -> {
@@ -146,9 +147,9 @@ public class ServerIssueTrackerWrapper {
 
 
   @NotNull
-  private static Map<String, List<ClientTrackedFindingDto>> getClientTrackedIssuesByServerRelativePath(String filePath, Collection<Trackable> issueTrackables) {
+  private static Map<Path, List<ClientTrackedFindingDto>> getClientTrackedIssuesByServerRelativePath(String filePath, Collection<Trackable> issueTrackables) {
     var clientTrackedIssueDtos = issueTrackables.stream().map(ServerIssueTrackerWrapper::createClientTrackedIssueDto).toList();
-    return Map.of(filePath, clientTrackedIssueDtos);
+    return Map.of(Path.of(filePath), clientTrackedIssueDtos);
   }
 
   static Optional<URI> getWorkspaceFolderUri(Collection<Issue> issues, WorkspaceFoldersManager workspaceFoldersManager) {

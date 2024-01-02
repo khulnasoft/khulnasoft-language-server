@@ -74,7 +74,6 @@ import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageClient;
 import org.sonarsource.sonarlint.ls.backend.BackendServiceFacade;
 import org.sonarsource.sonarlint.ls.commands.ShowAllLocationsCommand;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingManager;
-import org.sonarsource.sonarlint.ls.connected.ProjectBindingWrapper;
 import org.sonarsource.sonarlint.ls.connected.api.RequestsHandlerServer;
 import org.sonarsource.sonarlint.ls.connected.events.ServerSentEventsHandlerService;
 import org.sonarsource.sonarlint.ls.connected.notifications.SmartNotifications;
@@ -155,14 +154,10 @@ public class SonarLintVSCodeClient implements SonarLintRpcClientDelegate {
   }
 
   @Override
-  public void showIssue(String configurationScopeId, IssueDetailsDto issueDetails) {
-    var maybeFileUri = bindingManager.serverPathToFileUri(configurationScopeId);
-    Optional<ProjectBindingWrapper> maybeBinding = Optional.empty();
-    if (maybeFileUri.isPresent()) {
-      maybeBinding = bindingManager.getBinding(maybeFileUri.get());
-    }
+  public void showIssue(String folderUri, IssueDetailsDto issueDetails) {
+    var maybeBinding = bindingManager.getBinding(URI.create(folderUri));
     maybeBinding.ifPresent(projectBindingWrapper ->
-      client.showIssue(new ShowAllLocationsCommand.Param(new ShowIssueParams(configurationScopeId, issueDetails),
+      client.showIssue(new ShowAllLocationsCommand.Param(new ShowIssueParams(folderUri, issueDetails),
         bindingManager, projectBindingWrapper.getConnectionId())));
   }
 

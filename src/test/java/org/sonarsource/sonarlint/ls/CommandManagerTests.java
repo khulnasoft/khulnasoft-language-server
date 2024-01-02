@@ -71,9 +71,6 @@ import org.sonarsource.sonarlint.core.rpc.protocol.backend.rules.RuleDescription
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.rules.RuleMonolithicDescriptionDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.rules.RuleNonContextualSectionDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.rules.RuleSplitDescriptionDto;
-import org.sonarsource.sonarlint.core.rpc.protocol.backend.tracking.TaintVulnerabilityDto;
-import org.sonarsource.sonarlint.core.rpc.protocol.common.LocationDto;
-import org.sonarsource.sonarlint.core.serverconnection.ProjectBinding;
 import org.sonarsource.sonarlint.core.serverconnection.issues.ServerTaintIssue;
 import org.sonarsource.sonarlint.ls.IssuesCache.VersionedIssue;
 import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageClient.ShowRuleDescriptionParams;
@@ -81,7 +78,7 @@ import org.sonarsource.sonarlint.ls.backend.BackendService;
 import org.sonarsource.sonarlint.ls.backend.BackendServiceFacade;
 import org.sonarsource.sonarlint.ls.connected.DelegatingIssue;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingManager;
-import org.sonarsource.sonarlint.ls.connected.ProjectBindingWrapper;
+import org.sonarsource.sonarlint.ls.connected.ProjectBinding;
 import org.sonarsource.sonarlint.ls.connected.TaintVulnerabilitiesCache;
 import org.sonarsource.sonarlint.ls.connected.domain.TaintIssue;
 import org.sonarsource.sonarlint.ls.folders.WorkspaceFolderWrapper;
@@ -110,7 +107,6 @@ import static org.sonarsource.sonarlint.ls.CommandManager.SONARLINT_OPEN_RULE_DE
 import static org.sonarsource.sonarlint.ls.CommandManager.SONARLINT_QUICK_FIX_APPLIED;
 import static org.sonarsource.sonarlint.ls.CommandManager.SONARLINT_SHOW_SECURITY_HOTSPOT_FLOWS;
 import static org.sonarsource.sonarlint.ls.CommandManager.SONARLINT_SHOW_TAINT_VULNERABILITY_FLOWS;
-import static org.sonarsource.sonarlint.ls.CommandManager.SONARLINT_UPDATE_ALL_BINDINGS_COMMAND;
 import static org.sonarsource.sonarlint.ls.notebooks.VersionedOpenNotebookTests.createTestNotebookWithThreeCells;
 
 class CommandManagerTests {
@@ -127,7 +123,7 @@ class CommandManagerTests {
   };
   private CommandManager underTest;
   private ProjectBindingManager bindingManager;
-  private ProjectBindingWrapper mockBinding;
+  private ProjectBinding mockBinding;
   private ConnectedSonarLintEngine mockConnectedEngine;
   private SonarLintExtendedLanguageClient mockClient;
   private TaintVulnerabilitiesCache mockTaintVulnerabilitiesCache;
@@ -144,10 +140,10 @@ class CommandManagerTests {
   public void prepareMocks() {
     bindingManager = mock(ProjectBindingManager.class);
     mockSettingsManager = mock(SettingsManager.class);
-    mockBinding = mock(ProjectBindingWrapper.class);
+    mockBinding = mock(ProjectBinding.class);
     mockConnectedEngine = mock(ConnectedSonarLintEngine.class);
     when(mockBinding.getEngine()).thenReturn(mockConnectedEngine);
-    when(mockBinding.getBinding()).thenReturn(new ProjectBinding("projectKey", "sqPathPrefix", "idePathPrefix"));
+    when(mockBinding.getProjectKey()).thenReturn("projectKey");
 
     mockClient = mock(SonarLintExtendedLanguageClient.class);
     mockTaintVulnerabilitiesCache = mock(TaintVulnerabilitiesCache.class);

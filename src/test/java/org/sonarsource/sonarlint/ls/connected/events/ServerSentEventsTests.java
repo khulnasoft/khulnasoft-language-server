@@ -29,38 +29,25 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
 import org.eclipse.lsp4j.WorkspaceFolder;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 import org.sonarsource.sonarlint.core.client.api.connected.ConnectedSonarLintEngine;
-import org.sonarsource.sonarlint.core.client.api.connected.ProjectBranches;
-import org.sonarsource.sonarlint.core.commons.HotspotReviewStatus;
 import org.sonarsource.sonarlint.core.commons.IssueSeverity;
 import org.sonarsource.sonarlint.core.commons.RuleType;
-import org.sonarsource.sonarlint.core.commons.VulnerabilityProbability;
-import org.sonarsource.sonarlint.core.serverapi.push.IssueChangedEvent;
-import org.sonarsource.sonarlint.core.serverapi.push.SecurityHotspotChangedEvent;
-import org.sonarsource.sonarlint.core.serverapi.push.SecurityHotspotClosedEvent;
-import org.sonarsource.sonarlint.core.serverapi.push.SecurityHotspotRaisedEvent;
-import org.sonarsource.sonarlint.core.serverapi.push.TaintVulnerabilityClosedEvent;
 import org.sonarsource.sonarlint.core.serverapi.push.TaintVulnerabilityRaisedEvent;
-import org.sonarsource.sonarlint.core.serverconnection.ProjectBinding;
-import org.sonarsource.sonarlint.core.serverconnection.issues.ServerTaintIssue;
 import org.sonarsource.sonarlint.ls.AnalysisScheduler;
 import org.sonarsource.sonarlint.ls.DiagnosticPublisher;
 import org.sonarsource.sonarlint.ls.EnginesFactory;
 import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageClient;
 import org.sonarsource.sonarlint.ls.backend.BackendServiceFacade;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingManager;
-import org.sonarsource.sonarlint.ls.connected.ProjectBindingWrapper;
+import org.sonarsource.sonarlint.ls.connected.ProjectBinding;
 import org.sonarsource.sonarlint.ls.connected.TaintVulnerabilitiesCache;
-import org.sonarsource.sonarlint.ls.connected.domain.TaintIssue;
 import org.sonarsource.sonarlint.ls.connected.notifications.TaintVulnerabilityRaisedNotification;
 import org.sonarsource.sonarlint.ls.folders.WorkspaceFolderWrapper;
 import org.sonarsource.sonarlint.ls.folders.WorkspaceFoldersManager;
@@ -74,14 +61,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.sonarsource.sonarlint.ls.AnalysisScheduler.SONARCLOUD_TAINT_SOURCE;
-import static org.sonarsource.sonarlint.ls.AnalysisScheduler.SONARQUBE_TAINT_SOURCE;
-import static org.sonarsource.sonarlint.ls.util.Utils.textRangeWithHashFromTextRange;
 
 class ServerSentEventsTests {
   @TempDir
@@ -90,7 +72,7 @@ class ServerSentEventsTests {
   SonarLintLogTester logTester = new SonarLintLogTester();
   private Path workspaceFolderPath;
   private Path fileInAWorkspaceFolderPath;
-  ConcurrentMap<URI, Optional<ProjectBindingWrapper>> folderBindingCache;
+  ConcurrentMap<URI, Optional<ProjectBinding>> folderBindingCache;
   ConcurrentMap<String, Optional<ConnectedSonarLintEngine>> connectedEngineCacheByConnectionId;
   private ServerSentEventsHandlerService underTest;
   private final SettingsManager settingsManager = mock(SettingsManager.class);
@@ -150,13 +132,10 @@ class ServerSentEventsTests {
 
   private void prepareForServerEventTests() {
     mockFileInAFolder();
-    var projectBindingWrapperMock = mock(ProjectBindingWrapper.class);
-    var projectBinding = mock(ProjectBinding.class);
-    when(projectBinding.projectKey()).thenReturn(PROJECT_KEY);
-    when(projectBindingWrapperMock.getBinding()).thenReturn(projectBinding);
+    var projectBindingWrapperMock = mock(ProjectBinding.class);
+    when(projectBindingWrapperMock.getProjectKey()).thenReturn(PROJECT_KEY);
     folderBindingCache.put(workspaceFolderPath.toUri(), Optional.of(projectBindingWrapperMock));
     when(projectBindingWrapperMock.getEngine()).thenReturn(fakeEngine);
-    when(projectBinding.serverPathToIdePath(fileInAWorkspaceFolderPath.toUri().toString())).thenReturn(Optional.of(fileInAWorkspaceFolderPath.toString()));
     when(projectBindingWrapperMock.getConnectionId()).thenReturn(CONNECTION_ID);
   }
 

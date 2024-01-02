@@ -53,8 +53,6 @@ import org.sonarsource.sonarlint.core.rpc.protocol.backend.connection.projects.G
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.connection.projects.GetAllProjectsResponse;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.connection.validate.ValidateConnectionParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.connection.validate.ValidateConnectionResponse;
-import org.sonarsource.sonarlint.core.rpc.protocol.backend.file.GetPathTranslationParams;
-import org.sonarsource.sonarlint.core.rpc.protocol.backend.file.GetPathTranslationResponse;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.hotspot.ChangeHotspotStatusParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.hotspot.CheckLocalDetectionSupportedParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.hotspot.CheckLocalDetectionSupportedResponse;
@@ -84,7 +82,7 @@ import org.sonarsource.sonarlint.core.rpc.protocol.backend.tracking.TrackWithSer
 import org.sonarsource.sonarlint.core.rpc.protocol.client.binding.GetBindingSuggestionsResponse;
 import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageClient;
 import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageServer;
-import org.sonarsource.sonarlint.ls.connected.ProjectBindingWrapper;
+import org.sonarsource.sonarlint.ls.connected.ProjectBinding;
 import org.sonarsource.sonarlint.ls.log.LanguageClientLogger;
 import org.sonarsource.sonarlint.ls.settings.ServerConnectionSettings;
 import org.sonarsource.sonarlint.ls.util.EnumLabelsMapper;
@@ -155,12 +153,12 @@ public class BackendService {
       .toList();
   }
 
-  public ConfigurationScopeDto getConfigScopeDto(WorkspaceFolder added, Optional<ProjectBindingWrapper> bindingOptional) {
+  public ConfigurationScopeDto getConfigScopeDto(WorkspaceFolder added, Optional<ProjectBinding> bindingOptional) {
     BindingConfigurationDto bindingConfigurationDto;
     if (bindingOptional.isPresent()) {
-      ProjectBindingWrapper bindingWrapper = bindingOptional.get();
+      ProjectBinding bindingWrapper = bindingOptional.get();
       bindingConfigurationDto = new BindingConfigurationDto(bindingWrapper.getConnectionId(),
-        bindingWrapper.getBinding().projectKey(), true);
+        bindingWrapper.getProjectKey(), true);
     } else {
       bindingConfigurationDto = new BindingConfigurationDto(null, null, false);
     }
@@ -176,7 +174,7 @@ public class BackendService {
     initializedBackend().getConfigurationService().didUpdateBinding(params);
   }
 
-  public void addWorkspaceFolders(List<WorkspaceFolder> added, Function<WorkspaceFolder, Optional<ProjectBindingWrapper>> bindingProvider) {
+  public void addWorkspaceFolders(List<WorkspaceFolder> added, Function<WorkspaceFolder, Optional<ProjectBinding>> bindingProvider) {
     List<ConfigurationScopeDto> addedScopeDtos = added.stream()
       .map(folder -> getConfigScopeDto(folder, bindingProvider.apply(folder)))
       .toList();
@@ -184,7 +182,7 @@ public class BackendService {
     addConfigurationScopes(params);
   }
 
-  public void addWorkspaceFolder(WorkspaceFolder added, Optional<ProjectBindingWrapper> bindingWrapperOptional) {
+  public void addWorkspaceFolder(WorkspaceFolder added, Optional<ProjectBinding> bindingWrapperOptional) {
     ConfigurationScopeDto dto = getConfigScopeDto(added, bindingWrapperOptional);
     var params = new DidAddConfigurationScopesParams(List.of(dto));
     addConfigurationScopes(params);
@@ -324,10 +322,6 @@ public class BackendService {
 
   public TelemetryRpcService getTelemetryService() {
     return initializedBackend().getTelemetryService();
-  }
-
-  public  CompletableFuture<GetPathTranslationResponse> getPathWithTranslation(String folderUri) {
-    return initializedBackend().getFileService().getPathTranslation(new GetPathTranslationParams(folderUri));
   }
 
   public CompletableFuture<GetAllProjectsResponse> getAllProjects(Either<TransientSonarQubeConnectionDto, TransientSonarCloudConnectionDto> transientConnection) {

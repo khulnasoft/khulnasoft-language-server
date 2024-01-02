@@ -39,7 +39,7 @@ import org.eclipse.lsp4j.WorkspaceFolder;
 import org.eclipse.lsp4j.WorkspaceFoldersChangeEvent;
 import org.sonarsource.sonarlint.ls.backend.BackendServiceFacade;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingManager;
-import org.sonarsource.sonarlint.ls.connected.ProjectBindingWrapper;
+import org.sonarsource.sonarlint.ls.connected.ProjectBinding;
 import org.sonarsource.sonarlint.ls.log.LanguageClientLogOutput;
 import org.sonarsource.sonarlint.ls.util.Utils;
 
@@ -126,7 +126,7 @@ public class WorkspaceFoldersManager {
     return addedWrapper;
   }
 
-  private Function<WorkspaceFolder, Optional<ProjectBindingWrapper>> getBindingProvider() {
+  private Function<WorkspaceFolder, Optional<ProjectBinding>> getBindingProvider() {
     return folder -> bindingManager.getBinding(create(folder.getUri()));
   }
 

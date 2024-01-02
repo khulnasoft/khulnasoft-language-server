@@ -20,22 +20,13 @@
 package org.sonarsource.sonarlint.ls.connected;
 
 import java.net.URI;
-import java.time.Instant;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.sonarsource.sonarlint.core.client.api.connected.ConnectedSonarLintEngine;
-import org.sonarsource.sonarlint.core.client.api.connected.ProjectBranches;
-import org.sonarsource.sonarlint.core.commons.IssueSeverity;
-import org.sonarsource.sonarlint.core.commons.RuleType;
-import org.sonarsource.sonarlint.core.commons.TextRangeWithHash;
 import org.sonarsource.sonarlint.core.serverapi.EndpointParams;
-import org.sonarsource.sonarlint.core.serverconnection.ProjectBinding;
-import org.sonarsource.sonarlint.core.serverconnection.issues.ServerTaintIssue;
 import org.sonarsource.sonarlint.ls.DiagnosticPublisher;
 import org.sonarsource.sonarlint.ls.backend.BackendService;
 import org.sonarsource.sonarlint.ls.backend.BackendServiceFacade;
@@ -49,12 +40,10 @@ import testutils.SonarLintLogTester;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 class TaintIssuesUpdaterTests {
@@ -70,8 +59,8 @@ class TaintIssuesUpdaterTests {
   private final WorkspaceFolderWrapper workspaceFolderWrapper = mock(WorkspaceFolderWrapper.class);
   private final WorkspaceSettings workspaceSettings = mock(WorkspaceSettings.class);
   private final ProjectBindingManager bindingManager = mock(ProjectBindingManager.class);
-  private final ProjectBindingWrapper bindingWrapper = mock(ProjectBindingWrapper.class);
-  private final ProjectBinding binding = mock(ProjectBinding.class);
+  private final ProjectBinding bindingWrapper = mock(ProjectBinding.class);
+  private final org.sonarsource.sonarlint.core.serverconnection.ProjectBinding binding = mock(org.sonarsource.sonarlint.core.serverconnection.ProjectBinding.class);
   private final DiagnosticPublisher diagnosticPublisher = mock(DiagnosticPublisher.class);
   private final SettingsManager settingsManager = mock(SettingsManager.class);
   private final ServerConnectionSettings serverConnectionSettings = mock(ServerConnectionSettings.class);
@@ -92,7 +81,7 @@ class TaintIssuesUpdaterTests {
 //    when(engine.getServerBranches(PROJECT_KEY)).thenReturn(new ProjectBranches(Set.of("main", BRANCH_NAME), "main"));
     when(bindingWrapper.getEngine()).thenReturn(engine);
     when(bindingWrapper.getConnectionId()).thenReturn(CONNECTION_ID);
-    when(bindingWrapper.getBinding()).thenReturn(binding);
+    when(bindingWrapper.getProjectKey()).thenReturn(PROJECT_KEY);
     when(binding.projectKey()).thenReturn(PROJECT_KEY);
     when(settingsManager.getCurrentSettings()).thenReturn(workspaceSettings);
     when(workspaceSettings.getServerConnections()).thenReturn(SERVER_CONNECTIONS);

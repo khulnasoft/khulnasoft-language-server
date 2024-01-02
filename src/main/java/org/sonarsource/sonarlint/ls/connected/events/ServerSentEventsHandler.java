@@ -51,17 +51,13 @@ public class ServerSentEventsHandler implements ServerSentEventsHandlerService {
   }
 
   public void handleHotspotEvent(DidReceiveServerHotspotEvent event) {
-    var fileUri = getFileUriFromEvent(event.getServerFilePath());
-    fileUri.ifPresent(analysisScheduler::didReceiveHotspotEvent);
+    var fileUri = event.getIdeFilePath().toUri();
+    analysisScheduler.didReceiveHotspotEvent(fileUri);
   }
 
   public void updateTaintCache() {
     taintVulnerabilitiesCache.getAllFilesWithTaintIssues()
       .forEach(projectBindingManager::updateTaintIssueCacheFromStorageForFile);
-  }
-
-  private Optional<URI> getFileUriFromEvent(String serverPath) {
-    return projectBindingManager.serverPathToFileUri(serverPath);
   }
 
 //  @Override

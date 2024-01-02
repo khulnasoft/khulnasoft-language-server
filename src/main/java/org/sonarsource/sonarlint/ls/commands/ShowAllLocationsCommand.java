@@ -72,7 +72,7 @@ public final class ShowAllLocationsCommand {
     }
 
     public Param(ShowIssueParams showIssueParams, ProjectBindingManager projectBindingManager, String connectionId) {
-      this.fileUri = projectBindingManager.serverPathToFileUri(showIssueParams.getIssueDetails().getServerRelativeFilePath()).orElse(null);
+      this.fileUri = showIssueParams.getIssueDetails().getIdeFilePath().toUri();
       this.message = showIssueParams.getIssueDetails().getMessage();
       this.severity = "";
       this.ruleKey = showIssueParams.getIssueDetails().getRuleKey();
@@ -104,12 +104,12 @@ public final class ShowAllLocationsCommand {
       }
     }
 
-    Param(ServerTaintIssue issue, String connectionId, Function<String, Optional<URI>> pathResolver, Map<URI, LocalCodeFile> localFileCache) {
-      this.fileUri = pathResolver.apply(issue.getFilePath()).orElse(null);
+    Param(ServerTaintIssue issue, String connectionId, Map<URI, LocalCodeFile> localFileCache) {
+      this.fileUri = URI.create(issue.getFilePath());
       this.message = issue.getMessage();
       this.severity = issue.getSeverity().toString();
       this.ruleKey = issue.getRuleKey();
-      this.flows = issue.getFlows().stream().map(f -> new Flow(f, pathResolver, localFileCache)).toList();
+      this.flows = issue.getFlows().stream().map(f -> new Flow(f, localFileCache)).toList();
       this.textRange = issue.getTextRange();
       this.connectionId = connectionId;
       this.creationDate = DateTimeFormatter.ISO_DATE_TIME.format(issue.getCreationDate().atOffset(ZoneOffset.UTC));
@@ -165,8 +165,8 @@ public final class ShowAllLocationsCommand {
       this.locations = flow.getLocations().stream().map(locationDto -> new Location(locationDto, new HashMap<>(), projectBindingManager)).toList();
     }
 
-    private Flow(ServerTaintIssue.Flow flow, Function<String, Optional<URI>> pathResolver, Map<URI, LocalCodeFile> localFileCache) {
-      this.locations = flow.locations().stream().map(l -> new Location(l, pathResolver, localFileCache)).toList();
+    private Flow(ServerTaintIssue.Flow flow, Map<URI, LocalCodeFile> localFileCache) {
+      this.locations = flow.locations().stream().map(l -> new Location(l, localFileCache)).toList();
     }
 
     public List<Location> getLocations() {
@@ -196,7 +196,7 @@ public final class ShowAllLocationsCommand {
         location.getTextRange().getStartLineOffset(),
         location.getTextRange().getEndLine(),
         location.getTextRange().getEndLineOffset());
-      this.uri = projectBindingManager.serverPathToFileUri(location.getFilePath()).orElse(null);
+      this.uri = URI.create(location.getFilePath());
       this.message = location.getMessage();
       this.filePath = location.getFilePath();
       String localCode = codeExists(localCodeCache);
@@ -227,9 +227,9 @@ public final class ShowAllLocationsCommand {
       return null;
     }
 
-    private Location(ServerTaintIssue.ServerIssueLocation location, Function<String, Optional<URI>> pathResolver, Map<URI, LocalCodeFile> localCodeCache) {
+    private Location(ServerTaintIssue.ServerIssueLocation location, Map<URI, LocalCodeFile> localCodeCache) {
       this.textRange = location.getTextRange();
-      this.uri = pathResolver.apply(location.getFilePath()).orElse(null);
+      this.uri = URI.create(location.getFilePath());
       this.filePath = location.getFilePath();
       this.message = location.getMessage();
       String localCode = codeExists(localCodeCache);
@@ -275,8 +275,8 @@ public final class ShowAllLocationsCommand {
     return new Param(issue);
   }
 
-  public static Param params(ServerTaintIssue issue, String connectionId, Function<String, Optional<URI>> pathResolver) {
-    return new Param(issue, connectionId, pathResolver, new HashMap<>());
+  public static Param params(ServerTaintIssue issue, String connectionId) {
+    return new Param(issue, connectionId, new HashMap<>());
   }
 
   @CheckForNull

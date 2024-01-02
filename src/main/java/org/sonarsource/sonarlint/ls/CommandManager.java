@@ -57,9 +57,7 @@ import org.eclipse.lsp4j.jsonrpc.messages.ResponseErrorCode;
 import org.jetbrains.annotations.NotNull;
 import org.sonarsource.sonarlint.core.analysis.api.ClientInputFileEdit;
 import org.sonarsource.sonarlint.core.analysis.api.QuickFix;
-import org.sonarsource.sonarlint.core.commons.IssueSeverity;
 import org.sonarsource.sonarlint.core.commons.Language;
-import org.sonarsource.sonarlint.core.commons.RuleType;
 import org.sonarsource.sonarlint.core.commons.TextRange;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.issue.CheckStatusChangePermittedParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.rules.AbstractRuleDto;
@@ -77,7 +75,7 @@ import org.sonarsource.sonarlint.ls.backend.BackendServiceFacade;
 import org.sonarsource.sonarlint.ls.commands.ShowAllLocationsCommand;
 import org.sonarsource.sonarlint.ls.connected.DelegatingIssue;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingManager;
-import org.sonarsource.sonarlint.ls.connected.ProjectBindingWrapper;
+import org.sonarsource.sonarlint.ls.connected.ProjectBinding;
 import org.sonarsource.sonarlint.ls.connected.TaintVulnerabilitiesCache;
 import org.sonarsource.sonarlint.ls.folders.WorkspaceFoldersManager;
 import org.sonarsource.sonarlint.ls.log.LanguageClientLogOutput;
@@ -87,7 +85,6 @@ import org.sonarsource.sonarlint.ls.settings.SettingsManager;
 import org.sonarsource.sonarlint.ls.telemetry.SonarLintTelemetry;
 import org.sonarsource.sonarlint.ls.util.EnumLabelsMapper;
 import org.sonarsource.sonarlint.ls.util.Utils;
-import org.sonarsource.sonarlint.shaded.org.sonarsource.sonarlint.core.rpc.protocol.backend.rules.CleanCodeAttributeDto;
 
 import static java.net.URI.create;
 import static org.sonarsource.sonarlint.ls.AnalysisScheduler.SONARCLOUD_TAINT_SOURCE;
@@ -204,7 +201,7 @@ public class CommandManager {
     }
   }
 
-  private Optional<CodeAction> createResolveIssueCodeAction(Diagnostic diagnostic, URI uri, ProjectBindingWrapper binding, String ruleKey,
+  private Optional<CodeAction> createResolveIssueCodeAction(Diagnostic diagnostic, URI uri, ProjectBinding binding, String ruleKey,
     IssuesCache.VersionedIssue versionedIssue) {
     var isDelegatingIssue = versionedIssue.issue() instanceof DelegatingIssue;
     var delegatingIssue = isDelegatingIssue ? ((DelegatingIssue) versionedIssue.issue()) : null;
@@ -258,7 +255,7 @@ public class CommandManager {
       }
       var title = String.format("Open taint vulnerability '%s' on '%s'", ruleKey, actualBinding.getConnectionId());
       var serverUrl = settingsManager.getCurrentSettings().getServerConnections().get(actualBinding.getConnectionId()).getServerUrl();
-      var projectKey = UrlUtils.urlEncode(actualBinding.getBinding().projectKey());
+      var projectKey = UrlUtils.urlEncode(actualBinding.getProjectKey());
       var issueUrl = String.format("%s/project/issues?id=%s&issues=%s&open=%s", serverUrl, projectKey, issueKey, issueKey);
       codeActions.add(newQuickFix(diagnostic, title, SONARLINT_BROWSE_TAINT_VULNERABILITY, List.of(issueUrl)));
       codeActions.add(Either.forRight(createResolveIssueCodeAction(diagnostic, ruleKey, issueKey, uri, true)));
@@ -460,7 +457,7 @@ public class CommandManager {
     taintVulnerabilitiesCache.getTaintVulnerabilityByKey(issueKey)
       .ifPresent(issue -> {
         telemetry.taintVulnerabilitiesInvestigatedLocally();
-        client.showIssueOrHotspot(ShowAllLocationsCommand.params(issue, connectionId, bindingManager::serverPathToFileUri));
+        client.showIssueOrHotspot(ShowAllLocationsCommand.params(issue, connectionId));
       });
   }
 
