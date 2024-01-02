@@ -239,7 +239,7 @@ public class BackendService {
   public CompletableFuture<SonarLintExtendedLanguageServer.CheckIssueStatusChangePermittedResponse>
   checkStatusChangePermitted(String connectionId, String issueKey) {
     return initializedBackend().getIssueService().checkStatusChangePermitted(
-      new org.sonarsource.sonarlint.core.clientapi.backend.issue.CheckStatusChangePermittedParams(connectionId, issueKey))
+      new org.sonarsource.sonarlint.core.rpc.protocol.backend.issue.CheckStatusChangePermittedParams(connectionId, issueKey))
       .thenApply(result -> new SonarLintExtendedLanguageServer.CheckIssueStatusChangePermittedResponse(result.isPermitted(),
         result.getNotPermittedReason(), result.getAllowedStatuses().stream().map(EnumLabelsMapper::resolutionStatusToLabel).toList()))
       .exceptionally(t -> {

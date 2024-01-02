@@ -145,7 +145,8 @@ public class EnginesFactory {
       .setConnectionId(connectionId)
       .addEnabledLanguages(STANDALONE_LANGUAGES)
       .addEnabledLanguages(CONNECTED_ADDITIONAL_LANGUAGES)
-      .enableDataflowBugDetection()
+      // TODO uncomment after rebasing SLOOP branch on SLCODE master
+      //.enableDataflowBugDetection()
       .enableHotspots()
       .setNodeJs(nodeJsRuntime.getNodeJsPath(), nodeJsRuntime.getNodeJsVersion())
       .setModulesProvider(modulesProvider)

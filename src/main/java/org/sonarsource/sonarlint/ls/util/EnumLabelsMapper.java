@@ -19,7 +19,7 @@
  */
 package org.sonarsource.sonarlint.ls.util;
 
-import org.sonarsource.sonarlint.core.clientapi.backend.issue.ResolutionStatus;
+import org.sonarsource.sonarlint.core.rpc.protocol.backend.issue.ResolutionStatus;
 
 /**
  *  This is a temporary solution before the migration to the SonarLint
