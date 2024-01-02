@@ -57,17 +57,20 @@ import org.eclipse.lsp4j.jsonrpc.messages.ResponseErrorCode;
 import org.jetbrains.annotations.NotNull;
 import org.sonarsource.sonarlint.core.analysis.api.ClientInputFileEdit;
 import org.sonarsource.sonarlint.core.analysis.api.QuickFix;
+import org.sonarsource.sonarlint.core.commons.IssueSeverity;
 import org.sonarsource.sonarlint.core.commons.Language;
+import org.sonarsource.sonarlint.core.commons.RuleType;
 import org.sonarsource.sonarlint.core.commons.TextRange;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.issue.CheckStatusChangePermittedParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.rules.AbstractRuleDto;
-import org.sonarsource.sonarlint.core.rpc.protocol.backend.rules.CleanCodeAttributeDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.rules.GetStandaloneRuleDescriptionResponse;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.rules.ImpactDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.rules.RuleDescriptionTabDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.rules.RuleMonolithicDescriptionDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.rules.RuleParamDefinitionDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.rules.RuleSplitDescriptionDto;
+import org.sonarsource.sonarlint.core.rpc.protocol.common.CleanCodeAttribute;
+import org.sonarsource.sonarlint.core.rpc.protocol.common.CleanCodeAttributeCategory;
 import org.sonarsource.sonarlint.core.serverapi.UrlUtils;
 import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageClient.ShowRuleDescriptionParams;
 import org.sonarsource.sonarlint.ls.backend.BackendServiceFacade;
@@ -82,7 +85,9 @@ import org.sonarsource.sonarlint.ls.notebooks.OpenNotebooksCache;
 import org.sonarsource.sonarlint.ls.notebooks.VersionedOpenNotebook;
 import org.sonarsource.sonarlint.ls.settings.SettingsManager;
 import org.sonarsource.sonarlint.ls.telemetry.SonarLintTelemetry;
+import org.sonarsource.sonarlint.ls.util.EnumLabelsMapper;
 import org.sonarsource.sonarlint.ls.util.Utils;
+import org.sonarsource.sonarlint.shaded.org.sonarsource.sonarlint.core.rpc.protocol.backend.rules.CleanCodeAttributeDto;
 
 import static java.net.URI.create;
 import static org.sonarsource.sonarlint.ls.AnalysisScheduler.SONARCLOUD_TAINT_SOURCE;
@@ -380,22 +385,24 @@ public class CommandManager {
     var severity = org.sonarsource.sonarlint.core.commons.IssueSeverity.valueOf(ruleDetailsDto.getSeverity().name());
     var language = Language.valueOf(ruleDetailsDto.getLanguage().name());
     var languageKey = language.getLanguageKey();
-    var cleanCodeAttributeAndCategory = getCleanCodeAttributeAndCategory(ruleDetailsDto.getCleanCodeAttributeDetails());
+    var cleanCodeAttributeAndCategory = getCleanCodeAttributeAndCategory(ruleDetailsDto.getCleanCodeAttribute(), ruleDetailsDto.getCleanCodeAttributeCategory());
     var cleanCodeAttributeParam = cleanCodeAttributeAndCategory.getLeft();
     var cleanCodeAttributeCategoryParam = cleanCodeAttributeAndCategory.getRight();
-    var impacts = ruleDetailsDto.getDefaultImpacts().stream()
-      .collect(Collectors.toMap(ImpactDto::getSoftwareQualityLabel, ImpactDto::getImpactSeverityLabel));
+    Map<String, String> impacts = ruleDetailsDto.getDefaultImpacts().stream()
+      .collect(Collectors.toMap((ImpactDto impactDto) -> EnumLabelsMapper.softwareQualityToLabel(impactDto.getSoftwareQuality()),
+        impactDto -> EnumLabelsMapper.impactSeverityToLabel(impactDto.getImpactSeverity())));
     var htmlDescription = getHtmlDescription(description);
     var htmlDescriptionTabs = getHtmlDescriptionTabs(description, ruleContextKey);
     return new ShowRuleDescriptionParams(ruleKey, ruleName, htmlDescription, htmlDescriptionTabs, type, languageKey, severity, params,
       cleanCodeAttributeParam, cleanCodeAttributeCategoryParam, impacts);
   }
 
-  private static ImmutablePair<String, String> getCleanCodeAttributeAndCategory(@Nullable CleanCodeAttributeDto cleanCodeAttribute) {
+  private static ImmutablePair<String, String> getCleanCodeAttributeAndCategory(@Nullable CleanCodeAttribute cleanCodeAttribute,
+    @Nullable CleanCodeAttributeCategory cleanCodeAttributeCategory) {
     if (cleanCodeAttribute != null) {
-      var attributeCategory = cleanCodeAttribute.getCleanCodeAttributeCategory();
-      return new ImmutablePair<>(cleanCodeAttribute.getCleanCodeAttributeLabel(),
-        org.sonarsource.sonarlint.core.commons.CleanCodeAttributeCategory.valueOf(attributeCategory.name()).getLabel());
+      var attributeLabel = EnumLabelsMapper.cleanCodeAttributeToLabel(cleanCodeAttribute);
+      var attributeCategoryLabel = cleanCodeAttributeCategory != null ? EnumLabelsMapper.cleanCodeAttributeCategoryToLabel(cleanCodeAttributeCategory) : "";
+      return new ImmutablePair<>(attributeLabel, attributeCategoryLabel);
     }
     return new ImmutablePair<>("", "");
   }

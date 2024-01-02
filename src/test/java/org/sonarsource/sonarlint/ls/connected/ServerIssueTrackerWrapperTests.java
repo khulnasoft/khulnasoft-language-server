@@ -86,7 +86,7 @@ class ServerIssueTrackerWrapperTests {
     var issues = List.of(issue);
     var localOnlyIssueDto = createLocalOnlyIssueDto();
     var trackIssuesResponse = getTrackWithServerIssuesResponse(
-      List.of(new TrackWithServerIssuesResponse.ServerOrLocalIssueDto(Either.forRight(localOnlyIssueDto))));
+      List.of(Either.forRight(localOnlyIssueDto)));
     var tracker = newTracker(trackIssuesResponse);
 
     var result = matchAndTrack(tracker, "dummy", issues);
@@ -107,20 +107,16 @@ class ServerIssueTrackerWrapperTests {
     var engine = mock(ConnectedSonarLintEngine.class);
     when(engine.getServerIssues(any(), any(), any())).thenReturn(serverIssues);
 
-    var trackIssuesResponse = getTrackWithServerIssuesResponse(List.of(
-      new TrackWithServerIssuesResponse.ServerOrLocalIssueDto(Either.forRight(createLocalOnlyIssueDto())),
-      new TrackWithServerIssuesResponse.ServerOrLocalIssueDto(Either.forRight(createLocalOnlyIssueDto())))
-    );
+    var trackIssuesResponse = getTrackWithServerIssuesResponse(List.of(Either.forRight(createLocalOnlyIssueDto()),
+      Either.forRight(createLocalOnlyIssueDto())));
 
     var tracker = newTracker(trackIssuesResponse);
     var trackedIssues = matchAndTrack(tracker, "dummy", issues);
     assertThat(trackedIssues).extracting("issue").containsOnlyElementsOf(issues);
 
     when(resolvedServerIssue.isResolved()).thenReturn(true);
-    var trackIssuesResponse2 = getTrackWithServerIssuesResponse(List.of(
-      new TrackWithServerIssuesResponse.ServerOrLocalIssueDto(Either.forRight(createLocalOnlyIssueDto())),
-        new TrackWithServerIssuesResponse.ServerOrLocalIssueDto(Either.forLeft(createServerMatchedIssueDto(true))))
-    );
+    var trackIssuesResponse2 = getTrackWithServerIssuesResponse(List.of(Either.forRight(createLocalOnlyIssueDto()),
+        Either.forLeft(createServerMatchedIssueDto(true))));
     var tracker2 = newTracker(trackIssuesResponse2);
     var trackedIssues2 = matchAndTrack(tracker2, "dummy", issues);
     assertThat(trackedIssues2).extracting("issue").isEqualTo(List.of(unresolved));
@@ -143,8 +139,7 @@ class ServerIssueTrackerWrapperTests {
     when(engine.getServerIssues(any(), any(), any())).thenReturn(serverIssues);
 
     var trackIssuesResponse = getTrackWithServerIssuesResponse(List.of(
-      new TrackWithServerIssuesResponse.ServerOrLocalIssueDto(Either.forRight(createLocalOnlyIssueDto())),
-        new TrackWithServerIssuesResponse.ServerOrLocalIssueDto(Either.forLeft(createServerMatchedIssueDto(false)))));
+      Either.forRight(createLocalOnlyIssueDto()), Either.forLeft(createServerMatchedIssueDto(false))));
     var tracker = newTracker(engine, trackIssuesResponse);
     var trackedIssues = matchAndTrack(tracker, "dummy", issues);
 
@@ -329,7 +324,7 @@ class ServerIssueTrackerWrapperTests {
   }
 
   @NotNull
-  private static CompletableFuture<TrackWithServerIssuesResponse> getTrackWithServerIssuesResponse(List<TrackWithServerIssuesResponse.ServerOrLocalIssueDto> issuesInResponse) {
+  private static CompletableFuture<TrackWithServerIssuesResponse> getTrackWithServerIssuesResponse(List<Either<ServerMatchedIssueDto, LocalOnlyIssueDto>> issuesInResponse) {
     return CompletableFuture.completedFuture(new TrackWithServerIssuesResponse(Map.of("dummy", issuesInResponse)));
   }
 

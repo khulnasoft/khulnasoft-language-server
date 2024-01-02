@@ -37,7 +37,6 @@ import org.sonarsource.sonarlint.core.rpc.protocol.backend.rules.EffectiveRulePa
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.rules.RuleParamDefinitionDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.binding.AssistBindingParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.binding.SuggestBindingParams;
-import org.sonarsource.sonarlint.core.rpc.protocol.client.fs.FindFileByNamesInScopeResponse;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.hotspot.HotspotDetailsDto;
 import org.sonarsource.sonarlint.ls.commands.ShowAllLocationsCommand;
 import com.google.gson.annotations.Expose;
@@ -449,6 +448,44 @@ public interface SonarLintExtendedLanguageClient extends LanguageClient {
       int result = Objects.hash(folderUri);
       result = 31 * result + Arrays.hashCode(filenames);
       return result;
+    }
+  }
+
+  class FindFileByNamesInScopeResponse {
+    private final List<FoundFileDto> foundFiles;
+
+    public FindFileByNamesInScopeResponse(List<FoundFileDto> foundFiles) {
+      this.foundFiles = foundFiles;
+    }
+
+    public List<FoundFileDto> getFoundFiles() {
+      return foundFiles;
+    }
+  }
+
+  class FoundFileDto {
+
+    private final String fileName;
+    private final String filePath;
+
+    private final String content;
+
+    public FoundFileDto(String fileName, String filePath, String content) {
+      this.fileName = fileName;
+      this.filePath = filePath;
+      this.content = content;
+    }
+
+    public String getFileName() {
+      return fileName;
+    }
+
+    public String getFilePath() {
+      return filePath;
+    }
+
+    public String getContent() {
+      return content;
     }
   }
 

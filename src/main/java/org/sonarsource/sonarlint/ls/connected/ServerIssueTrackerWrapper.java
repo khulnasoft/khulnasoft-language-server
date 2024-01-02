@@ -29,21 +29,22 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 import javax.annotation.CheckForNull;
+import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.jetbrains.annotations.NotNull;
 import org.sonarsource.sonarlint.core.client.api.common.analysis.Issue;
 import org.sonarsource.sonarlint.core.client.api.common.analysis.IssueListener;
 import org.sonarsource.sonarlint.core.client.api.connected.ConnectedSonarLintEngine;
 import org.sonarsource.sonarlint.core.commons.RuleType;
-import org.sonarsource.sonarlint.core.http.HttpClient;
 import org.sonarsource.sonarlint.core.issuetracking.CachingIssueTracker;
 import org.sonarsource.sonarlint.core.issuetracking.InMemoryIssueTrackerCache;
 import org.sonarsource.sonarlint.core.issuetracking.IssueTrackerCache;
 import org.sonarsource.sonarlint.core.issuetracking.Trackable;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.tracking.ClientTrackedFindingDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.tracking.LineWithHashDto;
+import org.sonarsource.sonarlint.core.rpc.protocol.backend.tracking.LocalOnlyIssueDto;
+import org.sonarsource.sonarlint.core.rpc.protocol.backend.tracking.ServerMatchedIssueDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.tracking.TextRangeWithHashDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.tracking.TrackWithServerIssuesParams;
-import org.sonarsource.sonarlint.core.rpc.protocol.backend.tracking.TrackWithServerIssuesResponse;
 import org.sonarsource.sonarlint.core.serverapi.EndpointParams;
 import org.sonarsource.sonarlint.core.serverconnection.ProjectBinding;
 import org.sonarsource.sonarlint.core.tracking.IssueTrackable;
@@ -70,7 +71,6 @@ public class ServerIssueTrackerWrapper {
   private final IssueTrackerCache<Issue> hotspotsTrackerCache;
   private final CachingIssueTracker cachingIssueTracker;
   private final CachingIssueTracker cachingHotspotsTracker;
-  private final org.sonarsource.sonarlint.core.tracking.ServerIssueTracker tracker;
 
   ServerIssueTrackerWrapper(ConnectedSonarLintEngine engine, EndpointParams endpointParams,
     ProjectBinding projectBinding, Supplier<String> getReferenceBranchNameForFolder,
@@ -86,7 +86,6 @@ public class ServerIssueTrackerWrapper {
     this.hotspotsTrackerCache = new InMemoryIssueTrackerCache();
     this.cachingIssueTracker = new CachingIssueTracker(issueTrackerCache);
     this.cachingHotspotsTracker = new CachingIssueTracker(hotspotsTrackerCache);
-    this.tracker = new org.sonarsource.sonarlint.core.tracking.ServerIssueTracker(cachingHotspotsTracker);
   }
 
   public void matchAndTrack(String filePath, Collection<Issue> issues, IssueListener issueListener, boolean shouldFetchServerIssues) {
@@ -100,11 +99,11 @@ public class ServerIssueTrackerWrapper {
     cachingHotspotsTracker.matchAndTrackAsNew(filePath, toHotspotTrackables(issues));
 
     // TODO call backend IssueTrackingService.trackWithServerIssues() or another method for hostspots in HotspotTrackingService
-    if (shouldFetchServerIssues) {
-      tracker.update(engine, projectBinding, getReferenceBranchNameForFolder.get(), Collections.singleton(filePath));
-    } else {
-      tracker.update(engine, projectBinding, getReferenceBranchNameForFolder.get(), Collections.singleton(filePath));
-    }
+//    if (shouldFetchServerIssues) {
+//      tracker.update(engine, projectBinding, getReferenceBranchNameForFolder.get(), Collections.singleton(filePath));
+//    } else {
+//      tracker.update(engine, projectBinding, getReferenceBranchNameForFolder.get(), Collections.singleton(filePath));
+//    }
 
     Optional<URI> workspaceFolderUri = getWorkspaceFolderUri(issues, workspaceFoldersManager);
     workspaceFolderUri.ifPresent(uri -> matchAndTrackIssues(filePath, issueListener, shouldFetchServerIssues, issueTrackables, uri));
@@ -127,7 +126,7 @@ public class ServerIssueTrackerWrapper {
   }
 
   private static void matchAndTrackIssues(String filePath, IssueListener issueListener, Collection<Trackable> currentTrackables,
-    Map<String, List<TrackWithServerIssuesResponse.ServerOrLocalIssueDto>> issuesByServerRelativePath) {
+    Map<String, List<Either<ServerMatchedIssueDto, LocalOnlyIssueDto>>> issuesByServerRelativePath) {
     //
     var eitherList = issuesByServerRelativePath.getOrDefault(filePath, Collections.emptyList());
     Streams.zip(currentTrackables.stream(), eitherList.stream(), (issue, either) -> {

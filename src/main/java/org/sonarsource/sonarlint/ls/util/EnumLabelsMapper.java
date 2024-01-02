@@ -20,6 +20,10 @@
 package org.sonarsource.sonarlint.ls.util;
 
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.issue.ResolutionStatus;
+import org.sonarsource.sonarlint.core.rpc.protocol.common.CleanCodeAttribute;
+import org.sonarsource.sonarlint.core.rpc.protocol.common.CleanCodeAttributeCategory;
+import org.sonarsource.sonarlint.core.rpc.protocol.common.ImpactSeverity;
+import org.sonarsource.sonarlint.core.rpc.protocol.common.SoftwareQuality;
 
 /**
  *  This is a temporary solution before the migration to the SonarLint
@@ -49,4 +53,47 @@ public class EnumLabelsMapper {
     };
   }
 
+  public static String cleanCodeAttributeToLabel(CleanCodeAttribute cleanCodeAttribute) {
+    return switch (cleanCodeAttribute) {
+      case CONVENTIONAL -> "Not conventional";
+      case FORMATTED -> "Not formatted";
+      case IDENTIFIABLE -> "Not identifiable";
+      case CLEAR -> "Not clear";
+      case COMPLETE -> "Not complete";
+      case EFFICIENT -> "Not efficient";
+      case LOGICAL -> "Not logical";
+      case DISTINCT -> "Not distinct";
+      case FOCUSED -> "Not focused";
+      case MODULAR -> "Not modular";
+      case TESTED -> "Not tested";
+      case LAWFUL -> "Not lawful";
+      case RESPECTFUL -> "Not respectful";
+      case TRUSTWORTHY -> "Not trustworthy";
+    };
+  }
+
+  public static String cleanCodeAttributeCategoryToLabel(CleanCodeAttributeCategory cleanCodeAttributeCategory) {
+    return switch (cleanCodeAttributeCategory) {
+      case ADAPTABLE -> "Adaptability";
+      case CONSISTENT -> "Consistency";
+      case INTENTIONAL -> "Intentionality";
+      case RESPONSIBLE -> "Responsibility";
+    };
+  }
+
+  public static String softwareQualityToLabel(SoftwareQuality softwareQuality) {
+    return switch (softwareQuality) {
+      case MAINTAINABILITY -> "Maintainability";
+      case RELIABILITY -> "Reliability";
+      case SECURITY -> "Security";
+    };
+  }
+
+  public static String impactSeverityToLabel(ImpactSeverity softwareQuality) {
+    return switch (softwareQuality) {
+      case LOW -> "Low";
+      case MEDIUM -> "Medium";
+      case HIGH -> "High";
+    };
+  }
 }

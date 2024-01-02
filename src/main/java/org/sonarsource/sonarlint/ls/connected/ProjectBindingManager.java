@@ -421,7 +421,7 @@ public class ProjectBindingManager implements WorkspaceSettingsChangeListener, W
   private void tryStopServer(String connectionId, Optional<ConnectedSonarLintEngine> engine) {
     engine.ifPresent(e -> {
       try {
-        e.stop(false);
+        e.stop();
       } catch (Exception ex) {
         globalLogOutput.error("Unable to stop engine '" + connectionId + "'", ex);
       }
@@ -510,7 +510,9 @@ public class ProjectBindingManager implements WorkspaceSettingsChangeListener, W
   }
 
   public String resolveBranchNameForFolder(@Nullable URI folder, ConnectedSonarLintEngine engine, String projectKey) {
-    return branchNameForFolderSupplier.apply(folder).orElse(engine.getServerBranches(projectKey).getMainBranchName());
+    // TODO use backend
+    // return branchNameForFolderSupplier.apply(folder).orElse(engine.getServerBranches(projectKey).getMainBranchName());
+    return "";
   }
 
   public Map<String, String> getRemoteProjects(@Nullable String maybeConnectionId) {

@@ -53,6 +53,7 @@ import org.sonarsource.sonarlint.core.rpc.protocol.backend.hotspot.CheckLocalDet
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.initialize.ClientConstantInfoDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.initialize.FeatureFlagsDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.initialize.InitializeParams;
+import org.sonarsource.sonarlint.core.rpc.protocol.backend.initialize.TelemetryClientConstantAttributesDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.issue.CheckStatusChangePermittedParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.issue.CheckStatusChangePermittedResponse;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.issue.ReopenAllIssuesForFileParams;
@@ -69,7 +70,6 @@ import org.sonarsource.sonarlint.core.rpc.protocol.backend.telemetry.TelemetryRp
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.tracking.ListAllResponse;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.tracking.TrackWithServerIssuesParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.tracking.TrackWithServerIssuesResponse;
-import org.sonarsource.sonarlint.core.rpc.protocol.client.telemetry.TelemetryConstantAttributesDto;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingWrapper;
 import org.sonarsource.sonarlint.ls.settings.ServerConnectionSettings;
 import org.sonarsource.sonarlint.ls.settings.SettingsManager;
@@ -140,16 +140,15 @@ public class BackendServiceFacade {
   private InitializeParams toInitParams(BackendInitParams initParams) {
     return new InitializeParams(
       new ClientConstantInfoDto("Visual Studio Code", initParams.getUserAgent()),
-      new TelemetryConstantAttributesDto(initParams.getTelemetryProductKey(),
+      new TelemetryClientConstantAttributesDto(initParams.getTelemetryProductKey(),
         telemetryInitParams.getProductName(),
         telemetryInitParams.getProductVersion(),
         telemetryInitParams.getIdeVersion(),
-        telemetryInitParams.getPlatform(),
-        telemetryInitParams.getArchitecture(),
         telemetryInitParams.getAdditionalAttributes()),
       new FeatureFlagsDto(true, true, true,
-        true, initParams.isEnableSecurityHotspots(), true, true),
+        true, initParams.isEnableSecurityHotspots(), true, true, true),
       initParams.getStorageRoot(),
+      // TODO work dir
       null,
       initParams.getEmbeddedPluginPaths(),
       initParams.getConnectedModeEmbeddedPluginPathsByKey(),
@@ -159,7 +158,9 @@ public class BackendServiceFacade {
       initParams.getSonarCloudConnections(),
       initParams.getSonarlintUserHome(),
       initParams.getStandaloneRuleConfigByKey(),
-      initParams.isFocusOnNewCode()
+      initParams.isFocusOnNewCode(),
+      // TODO clientNodePath
+      null
     );
   }
 

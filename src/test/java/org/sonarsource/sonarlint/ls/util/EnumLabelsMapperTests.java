@@ -20,7 +20,7 @@
 package org.sonarsource.sonarlint.ls.util;
 
 import org.junit.jupiter.api.Test;
-import org.sonarsource.sonarlint.core.clientapi.backend.issue.ResolutionStatus;
+import org.sonarsource.sonarlint.core.rpc.protocol.backend.issue.ResolutionStatus;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;

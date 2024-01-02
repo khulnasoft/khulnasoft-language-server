@@ -62,7 +62,6 @@ import org.sonarsource.sonarlint.core.commons.SoftwareQuality;
 import org.sonarsource.sonarlint.core.commons.TextRange;
 import org.sonarsource.sonarlint.core.commons.VulnerabilityProbability;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.issue.CheckStatusChangePermittedResponse;
-import org.sonarsource.sonarlint.core.rpc.protocol.backend.rules.CleanCodeAttributeDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.rules.EffectiveRuleDetailsDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.rules.GetEffectiveRuleDetailsResponse;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.rules.ImpactDto;
@@ -388,12 +387,10 @@ class CommandManagerTests {
     when(details.getParams()).thenReturn(emptyList());
     when(details.getKey()).thenReturn(FAKE_RULE_KEY);
     when(details.getLanguage()).thenReturn(org.sonarsource.sonarlint.core.rpc.protocol.common.Language.JS);
-    when(details.getCleanCodeAttributeDetails()).thenReturn(
-      new CleanCodeAttributeDto(org.sonarsource.sonarlint.core.rpc.protocol.common.CleanCodeAttribute.COMPLETE, "complete",
-        org.sonarsource.sonarlint.core.rpc.protocol.common.CleanCodeAttributeCategory.INTENTIONAL, "intentional"));
+    when(details.getCleanCodeAttribute()).thenReturn(org.sonarsource.sonarlint.core.rpc.protocol.common.CleanCodeAttribute.COMPLETE);
     when(details.getDefaultImpacts()).thenReturn(
-      List.of(new ImpactDto(org.sonarsource.sonarlint.core.rpc.protocol.common.SoftwareQuality.SECURITY, "security", org.sonarsource.sonarlint.core.rpc.protocol.common.ImpactSeverity.HIGH, "high"),
-        new ImpactDto(org.sonarsource.sonarlint.core.rpc.protocol.common.SoftwareQuality.SECURITY, "security", org.sonarsource.sonarlint.core.rpc.protocol.common.ImpactSeverity.MEDIUM, "high")));
+      List.of(new ImpactDto(org.sonarsource.sonarlint.core.rpc.protocol.common.SoftwareQuality.SECURITY, org.sonarsource.sonarlint.core.rpc.protocol.common.ImpactSeverity.HIGH),
+        new ImpactDto(org.sonarsource.sonarlint.core.rpc.protocol.common.SoftwareQuality.SECURITY, org.sonarsource.sonarlint.core.rpc.protocol.common.ImpactSeverity.MEDIUM)));
     var desc = mock(RuleMonolithicDescriptionDto.class);
     when(desc.getHtmlContent()).thenReturn("Desc");
     when(details.getDescription()).thenReturn(Either.forLeft(desc));
@@ -529,7 +526,8 @@ class CommandManagerTests {
   @Test
   void getHtmlDescriptionTabsMonolithicShouldReturnNoTabs() {
     var monolithicDesc = new RuleMonolithicDescriptionDto("monolithicHtmlContent");
-    var ruleDetails = new EffectiveRuleDetailsDto(null, null, null, null,  null, null, Either.forLeft(monolithicDesc), emptyList(), null);
+    var ruleDetails = new EffectiveRuleDetailsDto(null, null, null, null,  null, null,
+      List.of(), Either.forLeft(monolithicDesc), emptyList(), null, null);
 
     assertThat(CommandManager.getHtmlDescriptionTabs(ruleDetails.getDescription(), "")).isEmpty();
   }
@@ -541,7 +539,8 @@ class CommandManagerTests {
     var tab1 = new RuleDescriptionTabDto("title1", Either.forLeft(section1));
     var tab2 = new RuleDescriptionTabDto("title2", Either.forLeft(section2));
     var splitDesc = new RuleSplitDescriptionDto("introHtmlContent", List.of(tab1, tab2));
-    var ruleDetails = new EffectiveRuleDetailsDto(null, null, null, null,  null, null,Either.forRight(splitDesc), emptyList(), null);
+    var ruleDetails = new EffectiveRuleDetailsDto(null, null, null, null,  null, null,
+      List.of(), Either.forRight(splitDesc), emptyList(), null, null);
 
     var descriptionTabs = CommandManager.getHtmlDescriptionTabs(ruleDetails.getDescription(), "");
 
@@ -568,7 +567,8 @@ class CommandManagerTests {
     var tab1 = new RuleDescriptionTabDto("title1", Either.forRight(sectionDto1));
     var tab2 = new RuleDescriptionTabDto("title2", Either.forRight(sectionDto2));
     var splitDesc = new RuleSplitDescriptionDto("introHtmlContent", List.of(tab1, tab2));
-    var ruleDetails = new EffectiveRuleDetailsDto(null, null, null, null,  null, null, Either.forRight(splitDesc), emptyList(), null);
+    var ruleDetails = new EffectiveRuleDetailsDto(null, null, null, null,  null, null,
+      List.of(), Either.forRight(splitDesc), emptyList(), null, null);
 
     var descriptionTabs = CommandManager.getHtmlDescriptionTabs(ruleDetails.getDescription(), "java");
 
@@ -595,7 +595,8 @@ class CommandManagerTests {
   @Test
   void getHtmlDescriptionMonolithic() {
     var monolithicDesc = new RuleMonolithicDescriptionDto("monolithicHtmlContent");
-    var ruleDetails = new EffectiveRuleDetailsDto(null, null, null, null,  null, null,Either.forLeft(monolithicDesc), emptyList(), null);
+    var ruleDetails = new EffectiveRuleDetailsDto(null, null, null, null,  null, null,
+      List.of(), Either.forLeft(monolithicDesc), emptyList(), null, null);
 
     assertThat(CommandManager.getHtmlDescription(ruleDetails.getDescription())).isEqualTo("monolithicHtmlContent");
   }
@@ -605,7 +606,8 @@ class CommandManagerTests {
     var section1 = new RuleNonContextualSectionDto(null);
     var tab1 = new RuleDescriptionTabDto(null, Either.forLeft(section1));
     var splitDesc = new RuleSplitDescriptionDto("splitHtmlContent", List.of(tab1));
-    var ruleDetails = new EffectiveRuleDetailsDto(null, null, null, null,  null, null,Either.forRight(splitDesc), emptyList(), null);
+    var ruleDetails = new EffectiveRuleDetailsDto(null, null, null, null,  null, null,
+      List.of(), Either.forRight(splitDesc), emptyList(), null, null);
 
 
     assertThat(CommandManager.getHtmlDescription(ruleDetails.getDescription())).isEqualTo("splitHtmlContent");

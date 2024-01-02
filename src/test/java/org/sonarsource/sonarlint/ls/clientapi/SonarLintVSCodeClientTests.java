@@ -45,14 +45,12 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.sonarsource.sonarlint.core.client.api.connected.ConnectedSonarLintEngine;
+import org.sonarsource.sonarlint.core.rpc.client.ConfigScopeNotFoundException;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.config.binding.BindingSuggestionDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.OpenUrlInBrowserParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.binding.AssistBindingParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.binding.SuggestBindingParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.connection.AssistCreatingConnectionParams;
-import org.sonarsource.sonarlint.core.rpc.protocol.client.fs.FindFileByNamesInScopeParams;
-import org.sonarsource.sonarlint.core.rpc.protocol.client.fs.FindFileByNamesInScopeResponse;
-import org.sonarsource.sonarlint.core.rpc.protocol.client.fs.FoundFileDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.hotspot.HotspotDetailsDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.hotspot.ShowHotspotParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.http.CheckServerTrustedParams;
@@ -173,10 +171,10 @@ class SonarLintVSCodeClientTests {
   }
 
   @Test
-  void shouldCallClientToFindFile() {
-    when(client.findFileByNamesInFolder(any())).thenReturn(CompletableFuture.completedFuture(new FindFileByNamesInScopeResponse(List.of())));
+  void shouldCallClientToFindFile() throws ConfigScopeNotFoundException {
+    when(client.findFileByNamesInFolder(any())).thenReturn(CompletableFuture.completedFuture(new SonarLintExtendedLanguageClient.FindFileByNamesInScopeResponse(List.of())));
 
-    underTest.findFileByNamesInScope("configScopeId", List.of(), mock(CancelChecker.class));
+    underTest.listFiles("configScopeId");
 
     var expectedClientParams =
       new SonarLintExtendedLanguageClient.FindFileByNamesInFolder("configScopeId", List.of());
@@ -260,15 +258,15 @@ class SonarLintVSCodeClientTests {
   }
 
   @Test
-  void shouldAskTheClientToFindFiles() {
+  void shouldAskTheClientToFindFiles() throws ConfigScopeNotFoundException {
     var folderUri = "file:///some/folder";
     var filesToFind = List.of("file1", "file2");
     var params = new SonarLintExtendedLanguageClient.FindFileByNamesInFolder(folderUri, filesToFind);
     when(client.findFileByNamesInFolder(params))
-      .thenReturn(CompletableFuture.completedFuture(new FindFileByNamesInScopeResponse(filesToFind.stream()
-        .map(f -> new FoundFileDto(f, folderUri + "/" + f, "")).collect(Collectors.toList()))));
+      .thenReturn(CompletableFuture.completedFuture(new SonarLintExtendedLanguageClient.FindFileByNamesInScopeResponse(filesToFind.stream()
+        .map(f -> new SonarLintExtendedLanguageClient.FoundFileDto(f, folderUri + "/" + f, "")).collect(Collectors.toList()))));
 
-    underTest.findFileByNamesInScope(folderUri, filesToFind, mock(CancelChecker.class));
+    underTest.listFiles(folderUri);
     var argumentCaptor = ArgumentCaptor.forClass(SonarLintExtendedLanguageClient.FindFileByNamesInFolder.class);
     verify(client).findFileByNamesInFolder(argumentCaptor.capture());
     assertThat(argumentCaptor.getValue()).extracting(

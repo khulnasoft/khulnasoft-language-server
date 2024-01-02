@@ -21,6 +21,7 @@ package org.sonarsource.sonarlint.ls.clientapi;
 
 import java.net.URI;
 import java.net.URL;
+import java.nio.file.Path;
 import java.security.cert.CertificateEncodingException;
 import java.security.cert.X509Certificate;
 import java.util.List;
@@ -50,7 +51,6 @@ import org.sonarsource.sonarlint.core.rpc.protocol.client.binding.SuggestBinding
 import org.sonarsource.sonarlint.core.rpc.protocol.client.connection.AssistCreatingConnectionParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.connection.AssistCreatingConnectionResponse;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.event.DidReceiveServerHotspotEvent;
-import org.sonarsource.sonarlint.core.rpc.protocol.client.fs.FoundFileDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.hotspot.HotspotDetailsDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.http.GetProxyPasswordAuthenticationResponse;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.http.ProxyDto;
@@ -64,7 +64,8 @@ import org.sonarsource.sonarlint.core.rpc.protocol.client.progress.ReportProgres
 import org.sonarsource.sonarlint.core.rpc.protocol.client.progress.StartProgressParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.smartnotification.ShowSmartNotificationParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.client.sync.DidSynchronizeConfigurationScopeParams;
-import org.sonarsource.sonarlint.core.rpc.protocol.client.telemetry.TelemetryLiveAttributesResponse;
+import org.sonarsource.sonarlint.core.rpc.protocol.client.telemetry.TelemetryClientLiveAttributesResponse;
+import org.sonarsource.sonarlint.core.rpc.protocol.common.ClientFileDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.common.TokenDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.common.UsernamePasswordDto;
 import org.sonarsource.sonarlint.ls.EnginesFactory;
@@ -109,16 +110,6 @@ public class SonarLintVSCodeClient implements SonarLintRpcClientDelegate {
     }
   }
 
-  @Override
-  public List<FoundFileDto> findFileByNamesInScope(String configScopeId, List<String> filenames, CancelChecker cancelChecker) {
-    try {
-      return client.findFileByNamesInFolder(new SonarLintExtendedLanguageClient.FindFileByNamesInFolder(configScopeId, filenames)).get().getFoundFiles();
-    } catch (InterruptedException e) {
-      throw new RuntimeException(e);
-    } catch (ExecutionException e) {
-      throw new RuntimeException(e);
-    }
-  }
   @Override
   public void openUrlInBrowser(URL url) {
     client.browseTo(url.toString());
@@ -214,13 +205,8 @@ public class SonarLintVSCodeClient implements SonarLintRpcClientDelegate {
   }
 
   @Override
-  public TelemetryLiveAttributesResponse getTelemetryLiveAttributes() {
-    return new TelemetryLiveAttributesResponse(
-      bindingManager.usesConnectedMode(), bindingManager.usesSonarCloud(),
-      nodeJsRuntime.nodeVersion(),
-      bindingManager.smartNotificationsDisabled(), getNonDefaultEnabledRules(),
-      getDefaultDisabledRules(), backendServiceFacade.getTelemetryInitParams().getAdditionalAttributes()
-    );
+  public TelemetryClientLiveAttributesResponse getTelemetryLiveAttributes() {
+    return new TelemetryClientLiveAttributesResponse(backendServiceFacade.getTelemetryInitParams().getAdditionalAttributes());
   }
 
 
@@ -328,16 +314,23 @@ public class SonarLintVSCodeClient implements SonarLintRpcClientDelegate {
   public void didUpdatePlugins(String connectionId) {
 
   }
-  @Override
-  public List<String> listAllFilePaths(String configurationScopeId) throws ConfigScopeNotFoundException {
-    return List.of();
-  }
 
   @Override
   public void didChangeTaintVulnerabilities(String configurationScopeId, Set<UUID> closedTaintVulnerabilityIds,
     List<TaintVulnerabilityDto> addedTaintVulnerabilities, List<TaintVulnerabilityDto> updatedTaintVulnerabilities) {
     // TODO update the cache TaintVulnerabilitiesCache
     // show a popup that new taint was found
+  }
+
+  @Override
+  public List<ClientFileDto> listFiles(String configScopeId) throws ConfigScopeNotFoundException {
+    // TODO implement
+    return List.of();
+  }
+
+  @Override
+  public void didChangeNodeJs(@Nullable Path nodeJsPath, @Nullable String version) {
+    // TODO implement
   }
 
   public void setSettingsManager(SettingsManager settingsManager) {

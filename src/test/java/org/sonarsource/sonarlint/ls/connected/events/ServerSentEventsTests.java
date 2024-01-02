@@ -131,7 +131,7 @@ class ServerSentEventsTests {
     fileInAWorkspaceFolderPath = workspaceFolderPath.resolve(FILE_PHP);
     Files.createFile(fileInAWorkspaceFolderPath);
 
-    when(fakeEngine.getServerBranches(any(String.class))).thenReturn(new ProjectBranches(Set.of(BRANCH_NAME), BRANCH_NAME));
+//    when(fakeEngine.getServerBranches(any(String.class))).thenReturn(new ProjectBranches(Set.of(BRANCH_NAME), BRANCH_NAME));
 
     folderBindingCache = new ConcurrentHashMap<>();
     connectedEngineCacheByConnectionId = new ConcurrentHashMap<>();

@@ -288,18 +288,19 @@ public class AnalysisTaskExecutor {
       .orElse(findCommonPrefix(filesToAnalyze.keySet().stream().map(Paths::get).collect(toList())).toUri());
 
     var nonExcludedFiles = new HashMap<>(filesToAnalyze);
-    if (binding.isPresent()) {
-      var connectedEngine = binding.get().getEngine();
-      var excludedByServerConfiguration = connectedEngine.getExcludedFiles(binding.get().getBinding(),
-        filesToAnalyze.keySet(),
-        uri -> FileUtils.getFileRelativePath(Paths.get(baseDirUri), uri, logOutput),
-        uri -> fileTypeClassifier.isTest(settings, uri, filesToAnalyze.get(uri).isJava(), () -> javaConfigCache.getOrFetch(uri)));
-      excludedByServerConfiguration.forEach(f -> {
-        clientLogger.debug(format("Skip analysis of file \"%s\" excluded by server configuration", f));
-        nonExcludedFiles.remove(f);
-        clearIssueCacheAndPublishEmptyDiagnostics(f);
-      });
-    }
+    // TODO get exclusions from backend
+//    if (binding.isPresent()) {
+//      var connectedEngine = binding.get().getEngine();
+//      var excludedByServerConfiguration = connectedEngine.getExcludedFiles(binding.get().getBinding(),
+//        filesToAnalyze.keySet(),
+//        uri -> FileUtils.getFileRelativePath(Paths.get(baseDirUri), uri, logOutput),
+//        uri -> fileTypeClassifier.isTest(settings, uri, filesToAnalyze.get(uri).isJava(), () -> javaConfigCache.getOrFetch(uri)));
+//      excludedByServerConfiguration.forEach(f -> {
+//        clientLogger.debug(format("Skip analysis of file \"%s\" excluded by server configuration", f));
+//        nonExcludedFiles.remove(f);
+//        clearIssueCacheAndPublishEmptyDiagnostics(f);
+//      });
+//    }
 
     if (!nonExcludedFiles.isEmpty()) {
       if (task.shouldShowProgress()) {

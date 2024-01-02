@@ -89,7 +89,7 @@ class TaintIssuesUpdaterTests {
     when(bindingManager.resolveBranchNameForFolder(FOLDER_URI, engine, PROJECT_KEY)).thenReturn(BRANCH_NAME);
     when(workspaceFoldersManager.findFolderForFile(FILE_URI)).thenReturn(Optional.of(workspaceFolderWrapper));
     when(workspaceFolderWrapper.getUri()).thenReturn(FOLDER_URI);
-    when(engine.getServerBranches(PROJECT_KEY)).thenReturn(new ProjectBranches(Set.of("main", BRANCH_NAME), "main"));
+//    when(engine.getServerBranches(PROJECT_KEY)).thenReturn(new ProjectBranches(Set.of("main", BRANCH_NAME), "main"));
     when(bindingWrapper.getEngine()).thenReturn(engine);
     when(bindingWrapper.getConnectionId()).thenReturn(CONNECTION_ID);
     when(bindingWrapper.getBinding()).thenReturn(binding);
