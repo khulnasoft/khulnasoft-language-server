@@ -318,9 +318,18 @@ public class SonarLintVSCodeClient implements SonarLintRpcClientDelegate {
   }
 
   @Override
-  public List<ClientFileDto> listFiles(String configScopeId) throws ConfigScopeNotFoundException {
-    // TODO implement
-    return List.of();
+  public List<ClientFileDto> listFiles(String folderUri) throws ConfigScopeNotFoundException {
+    try {
+      var response = client.listFilesInFolder(new SonarLintExtendedLanguageClient.FolderUriParams(folderUri)).get();
+      // TODO what's the difference between URI and Path in ClientFileDto?
+      return response.getFoundFiles().stream()
+        .map(file -> new ClientFileDto(URI.create(file.getFilePath()), Path.of(file.getFilePath()), folderUri, null, null, null, file.getContent()))
+        .toList();
+    } catch (InterruptedException e) {
+      throw new RuntimeException(e);
+    } catch (ExecutionException e) {
+      throw new RuntimeException(e);
+    }
   }
 
   @Override

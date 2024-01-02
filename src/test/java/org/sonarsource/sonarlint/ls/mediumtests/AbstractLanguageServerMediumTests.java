@@ -449,6 +449,11 @@ public abstract class AbstractLanguageServerMediumTests {
     }
 
     @Override
+    public CompletableFuture<FindFileByNamesInScopeResponse> listFilesInFolder(FolderUriParams params) {
+      return CompletableFuture.completedFuture(new FindFileByNamesInScopeResponse(Collections.emptyList()));
+    }
+
+    @Override
     public void showSonarLintOutput() {
     }
 

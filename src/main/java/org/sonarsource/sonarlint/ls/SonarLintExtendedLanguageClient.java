@@ -49,6 +49,9 @@ public interface SonarLintExtendedLanguageClient extends LanguageClient {
   @JsonRequest("sonarlint/findFileByNamesInFolder")
   CompletableFuture<FindFileByNamesInScopeResponse> findFileByNamesInFolder(FindFileByNamesInFolder params);
 
+  @JsonRequest("sonarlint/listFilesInFolder")
+  CompletableFuture<FindFileByNamesInScopeResponse> listFilesInFolder(FolderUriParams params);
+
   @JsonNotification("sonarlint/showSonarLintOutput")
   void showSonarLintOutput();
 
@@ -819,6 +822,31 @@ public interface SonarLintExtendedLanguageClient extends LanguageClient {
 
     public boolean isSupported() {
       return isSupported;
+    }
+  }
+
+  class FolderUriParams {
+    String folderUri;
+
+    public FolderUriParams(String folderUri) {
+      this.folderUri = folderUri;
+    }
+
+    public String getFolderUri() {
+      return folderUri;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) return true;
+      if (o == null || getClass() != o.getClass()) return false;
+      FolderUriParams that = (FolderUriParams) o;
+      return Objects.equals(folderUri, that.folderUri);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(folderUri);
     }
   }
 

@@ -82,17 +82,6 @@ class UtilsTests {
   }
 
   @Test
-  void valueOfTitleTest() {
-    // TODO Hotspots titles should be moved to shared module in the SLCORE
-    AssertionsForClassTypes.assertThat(hotspotStatusOfTitle("To Review")).isEqualTo(HotspotStatus.TO_REVIEW);
-    AssertionsForClassTypes.assertThat(hotspotStatusOfTitle("Safe")).isEqualTo(HotspotStatus.SAFE);
-    AssertionsForClassTypes.assertThat(hotspotStatusOfTitle("Fixed")).isEqualTo(HotspotStatus.FIXED);
-    AssertionsForClassTypes.assertThat(hotspotStatusOfTitle("Acknowledged")).isEqualTo(HotspotStatus.ACKNOWLEDGED);
-    var thrown = assertThrows(IllegalArgumentException.class, ()-> hotspotStatusOfTitle("Unknown"));
-    AssertionsForClassTypes.assertThat(thrown).hasMessage("There is no such hotspot status: Unknown");
-  }
-
-  @Test
   void valueOfHotspotReviewStatusTest() {
     for (HotspotReviewStatus value : HotspotReviewStatus.values()) {
       AssertionsForClassTypes.assertThat(hotspotStatusValueOfHotspotReviewStatus(value)).isEqualTo(HotspotStatus.valueOf(value.name()));

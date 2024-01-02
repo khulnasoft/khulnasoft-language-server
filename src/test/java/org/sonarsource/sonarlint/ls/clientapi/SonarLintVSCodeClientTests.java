@@ -170,13 +170,13 @@ class SonarLintVSCodeClientTests {
 
   @Test
   void shouldCallClientToFindFile() throws ConfigScopeNotFoundException {
-    when(client.findFileByNamesInFolder(any())).thenReturn(CompletableFuture.completedFuture(new SonarLintExtendedLanguageClient.FindFileByNamesInScopeResponse(List.of())));
+    when(client.listFilesInFolder(any())).thenReturn(CompletableFuture.completedFuture(new SonarLintExtendedLanguageClient.FindFileByNamesInScopeResponse(List.of())));
 
     underTest.listFiles("configScopeId");
 
     var expectedClientParams =
-      new SonarLintExtendedLanguageClient.FindFileByNamesInFolder("configScopeId", List.of());
-    verify(client).findFileByNamesInFolder(expectedClientParams);
+      new SonarLintExtendedLanguageClient.FolderUriParams("configScopeId");
+    verify(client).listFilesInFolder(expectedClientParams);
   }
 
   @Test
