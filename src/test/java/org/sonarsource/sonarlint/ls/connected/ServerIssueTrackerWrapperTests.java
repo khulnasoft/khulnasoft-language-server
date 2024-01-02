@@ -257,7 +257,7 @@ class ServerIssueTrackerWrapperTests {
     var workspaceSettings = mock(WorkspaceSettings.class);
 //    var httpClient = mock(HttpClient.class);
 //    when(backendServiceFacade.getBackendService()).thenReturn(backendService);
-    when(backendService.getHttpClient(any())).thenReturn(httpClient);
+//    when(backendService.getHttpClient(any())).thenReturn(httpClient);
     when(backendService.matchIssues(any())).thenReturn(trackIssuesResponse);
     when(workspaceFolderWrapper.getUri()).thenReturn(URI.create("dummy"));
     when(workspaceFoldersManager.findFolderForFile(any())).thenReturn(Optional.of(workspaceFolderWrapper));

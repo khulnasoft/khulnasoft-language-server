@@ -605,7 +605,7 @@ public class SonarLintLanguageServer implements SonarLintExtendedLanguageServer,
       lsLogOutput.debug(format("Folder %s is now on an unknown branch.", folderUri));
       return;
     }
-    backendServiceFacade.notifyBackendOnVscChange(folderUri);
+    backendServiceFacade.getBackendService().notifyBackendOnVscChange(folderUri);
   }
 
   @Override

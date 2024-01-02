@@ -220,7 +220,7 @@ public class SonarLintVSCodeClient implements SonarLintRpcClientDelegate {
   }
 
   private List<String> getDefaultEnabledRules() {
-    return backendServiceFacade.listAllStandaloneRulesDefinitions().thenApply(response ->
+    return backendServiceFacade.getBackendService().listAllStandaloneRulesDefinitions().thenApply(response ->
         response.getRulesByKey()
           .values()
           .stream()
