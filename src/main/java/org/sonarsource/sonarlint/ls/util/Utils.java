@@ -51,6 +51,7 @@ import org.sonarsource.sonarlint.core.rpc.protocol.backend.connection.common.Tra
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.connection.common.TransientSonarQubeConnectionDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.connection.validate.ValidateConnectionParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.hotspot.HotspotStatus;
+import org.sonarsource.sonarlint.core.rpc.protocol.backend.tracking.TextRangeWithHashDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.common.TokenDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.common.UsernamePasswordDto;
 import org.sonarsource.sonarlint.core.serverapi.push.TaintVulnerabilityRaisedEvent;
@@ -140,6 +141,19 @@ public class Utils {
   }
 
   public static Range convert(@Nullable TextRangeWithHash textRange) {
+    if (textRange == null) {
+      return new Range(new Position(0, 0), new Position(0, 0));
+    }
+    return new Range(
+      new Position(
+        textRange.getStartLine() - 1,
+        textRange.getStartLineOffset()),
+      new Position(
+        textRange.getEndLine() - 1,
+        textRange.getEndLineOffset()));
+  }
+
+  public static Range convert(@Nullable TextRangeWithHashDto textRange) {
     if (textRange == null) {
       return new Range(new Position(0, 0), new Position(0, 0));
     }

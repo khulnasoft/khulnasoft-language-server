@@ -550,7 +550,7 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
           .build())
         .build());
     mockWebServerExtension.addProtobufResponse("/api/issues/search.protobuf?statuses=OPEN,CONFIRMED,REOPENED,RESOLVED&types=VULNERABILITY&componentKeys=myProject&rules=&branch=master&ps=500&p=1",
-      Issues.SearchWsResponse.newBuilder().addIssues(Issues.Issue.newBuilder().setKey("issueKey").build()).build());
+      Issues.SearchWsResponse.newBuilder().build());
     mockWebServerExtension.addProtobufResponse("/api/issues/search.protobuf?statuses=OPEN,CONFIRMED,REOPENED,RESOLVED&types=VULNERABILITY&componentKeys=myProject&rules=&branch=master&ps=500&p=2",
       Issues.SearchWsResponse.newBuilder().addComponents(Issues.Component.newBuilder().setKey("componentKey").setPath("componentPath").build()).build());
     lsProxy.didLocalBranchNameChange(new SonarLintExtendedLanguageServer.DidLocalBranchNameChangeParams(folder1BaseDir.toUri().toString()

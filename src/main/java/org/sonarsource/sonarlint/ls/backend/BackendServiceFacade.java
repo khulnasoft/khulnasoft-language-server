@@ -54,12 +54,14 @@ public class BackendServiceFacade {
   private final ConfigurationScopeDto rootConfigurationScope;
   private final BackendJsonRpcLauncher serverLauncher;
   private final ClientJsonRpcLauncher clientLauncher;
+  private final LanguageClientLogger lsLogOutput;
   private SettingsManager settingsManager;
   private SonarLintTelemetry telemetry;
   private TelemetryInitParams telemetryInitParams;
   private final AtomicBoolean initialized = new AtomicBoolean(false);
 
   public BackendServiceFacade(SonarLintRpcClientDelegate rpcClient,  LanguageClientLogger lsLogOutput, SonarLintExtendedLanguageClient client) {
+    this.lsLogOutput = lsLogOutput;
     var clientToServerOutputStream = new PipedOutputStream();
     PipedInputStream clientToServerInputStream = null;
     try {
@@ -135,25 +137,22 @@ public class BackendServiceFacade {
 
   public void shutdown() {
     backendService.shutdown();
-    if (backendService != null) {
+    try {
+      backendService.shutdown().get(10, TimeUnit.SECONDS);
+    } catch (ExecutionException | TimeoutException e) {
+      lsLogOutput.error("Unable to shutdown the SonartLint backend", e);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    } finally {
       try {
-        backendService.shutdown().get(10, TimeUnit.SECONDS);
-      } catch (ExecutionException | TimeoutException e) {
-        // TODO adapt logs
-        // Platform.getLog(SonarLintBackendService.class).error("Unable to shutdown the SonartLint backend", e);
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-      } finally {
-        try {
-          serverLauncher.close();
-        } catch (Exception e) {
-          // Platform.getLog(SonarLintBackendService.class).error("Unable to stop the SonartLint server launcher", e);
-        }
-        try {
-          clientLauncher.close();
-        } catch (Exception e) {
-          // Platform.getLog(SonarLintBackendService.class).error("Unable to stop the SonartLint client launcher", e);
-        }
+        serverLauncher.close();
+      } catch (Exception e) {
+        lsLogOutput.error("Unable to stop the SonartLint server launcher", e);
+      }
+      try {
+        clientLauncher.close();
+      } catch (Exception e) {
+        lsLogOutput.error("Unable to stop the SonartLint client launcher", e);
       }
     }
   }

@@ -29,11 +29,9 @@ import org.junit.jupiter.api.Test;
 import org.sonarsource.sonarlint.core.client.api.common.analysis.Issue;
 import org.sonarsource.sonarlint.core.commons.IssueSeverity;
 import org.sonarsource.sonarlint.ls.IssuesCache.VersionedIssue;
-import org.sonarsource.sonarlint.ls.backend.BackendServiceFacade;
 import org.sonarsource.sonarlint.ls.connected.DelegatingIssue;
 import org.sonarsource.sonarlint.ls.connected.TaintVulnerabilitiesCache;
 import org.sonarsource.sonarlint.ls.file.VersionedOpenFile;
-import org.sonarsource.sonarlint.ls.folders.WorkspaceFoldersManager;
 import org.sonarsource.sonarlint.ls.notebooks.DelegatingCellIssue;
 import org.sonarsource.sonarlint.ls.notebooks.OpenNotebooksCache;
 
@@ -68,7 +66,7 @@ class DiagnosticPublisherTests {
     when(issue.getMessage()).thenReturn("Do this, don't do that");
     when(issue.getStartLine()).thenReturn(null);
     var versionedIssue = new VersionedIssue(issue, 1);
-    Diagnostic diagnostic = underTest.convert(entry("id", versionedIssue));
+    Diagnostic diagnostic = underTest.taintDtoToDiagnostic(entry("id", versionedIssue));
     assertThat(diagnostic.getRange()).isEqualTo(new Range(new Position(0, 0), new Position(0, 0)));
   }
 
@@ -80,15 +78,15 @@ class DiagnosticPublisherTests {
     when(issue.getSeverity()).thenReturn(IssueSeverity.BLOCKER);
     when(issue.getMessage()).thenReturn("Do this, don't do that");
     var versionedIssue = new VersionedIssue(issue, 1);
-    assertThat(underTest.convert(entry(id, versionedIssue)).getSeverity()).isEqualTo(DiagnosticSeverity.Warning);
+    assertThat(underTest.taintDtoToDiagnostic(entry(id, versionedIssue)).getSeverity()).isEqualTo(DiagnosticSeverity.Warning);
     when(issue.getSeverity()).thenReturn(IssueSeverity.CRITICAL);
-    assertThat(underTest.convert(entry(id, versionedIssue)).getSeverity()).isEqualTo(DiagnosticSeverity.Warning);
+    assertThat(underTest.taintDtoToDiagnostic(entry(id, versionedIssue)).getSeverity()).isEqualTo(DiagnosticSeverity.Warning);
     when(issue.getSeverity()).thenReturn(IssueSeverity.MAJOR);
-    assertThat(underTest.convert(entry(id, versionedIssue)).getSeverity()).isEqualTo(DiagnosticSeverity.Warning);
+    assertThat(underTest.taintDtoToDiagnostic(entry(id, versionedIssue)).getSeverity()).isEqualTo(DiagnosticSeverity.Warning);
     when(issue.getSeverity()).thenReturn(IssueSeverity.MINOR);
-    assertThat(underTest.convert(entry(id, versionedIssue)).getSeverity()).isEqualTo(DiagnosticSeverity.Warning);
+    assertThat(underTest.taintDtoToDiagnostic(entry(id, versionedIssue)).getSeverity()).isEqualTo(DiagnosticSeverity.Warning);
     when(issue.getSeverity()).thenReturn(IssueSeverity.INFO);
-    assertThat(underTest.convert(entry(id, versionedIssue)).getSeverity()).isEqualTo(DiagnosticSeverity.Warning);
+    assertThat(underTest.taintDtoToDiagnostic(entry(id, versionedIssue)).getSeverity()).isEqualTo(DiagnosticSeverity.Warning);
   }
 
   @Test

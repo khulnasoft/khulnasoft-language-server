@@ -22,18 +22,24 @@ package org.sonarsource.sonarlint.ls;
 import java.net.URI;
 import java.util.Comparator;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
 import java.util.stream.Stream;
 import javax.annotation.Nullable;
 import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.DiagnosticSeverity;
 import org.eclipse.lsp4j.PublishDiagnosticsParams;
+import org.eclipse.lsp4j.Range;
 import org.sonarsource.sonarlint.core.client.api.common.analysis.Issue;
 import org.sonarsource.sonarlint.core.commons.HotspotReviewStatus;
 import org.sonarsource.sonarlint.core.commons.Language;
 import org.sonarsource.sonarlint.core.commons.RuleType;
+import org.sonarsource.sonarlint.core.rpc.protocol.backend.tracking.TaintVulnerabilityDto;
+import org.sonarsource.sonarlint.core.rpc.protocol.backend.tracking.TextRangeWithHashDto;
 import org.sonarsource.sonarlint.ls.IssuesCache.VersionedIssue;
+import org.sonarsource.sonarlint.ls.backend.BackendServiceFacade;
 import org.sonarsource.sonarlint.ls.connected.DelegatingIssue;
 import org.sonarsource.sonarlint.ls.connected.TaintVulnerabilitiesCache;
+import org.sonarsource.sonarlint.ls.folders.WorkspaceFoldersManager;
 import org.sonarsource.sonarlint.ls.notebooks.OpenNotebooksCache;
 import org.sonarsource.sonarlint.ls.util.Utils;
 
@@ -54,16 +60,21 @@ public class DiagnosticPublisher {
   private final IssuesCache hotspotsCache;
   private final TaintVulnerabilitiesCache taintVulnerabilitiesCache;
   private final OpenNotebooksCache openNotebooksCache;
+  private final BackendServiceFacade backendServiceFacade;
+  private final WorkspaceFoldersManager workspaceFoldersManager;
 
   private boolean focusOnNewCode;
 
-  public DiagnosticPublisher(SonarLintExtendedLanguageClient client, TaintVulnerabilitiesCache taintVulnerabilitiesCache, IssuesCache issuesCache, IssuesCache hotspotsCache,
-    OpenNotebooksCache openNotebooksCache) {
+  public DiagnosticPublisher(SonarLintExtendedLanguageClient client, TaintVulnerabilitiesCache taintVulnerabilitiesCache,
+    IssuesCache issuesCache, IssuesCache hotspotsCache, OpenNotebooksCache openNotebooksCache,
+    BackendServiceFacade backendServiceFacade, WorkspaceFoldersManager workspaceFoldersManager) {
     this.client = client;
     this.taintVulnerabilitiesCache = taintVulnerabilitiesCache;
     this.issuesCache = issuesCache;
     this.hotspotsCache = hotspotsCache;
     this.openNotebooksCache = openNotebooksCache;
+    this.backendServiceFacade = backendServiceFacade;
+    this.workspaceFoldersManager = workspaceFoldersManager;
     this.focusOnNewCode = false;
   }
 
@@ -81,9 +92,21 @@ public class DiagnosticPublisher {
     client.publishSecurityHotspots(createPublishSecurityHotspotsParams(f));
   }
 
-  Diagnostic convert(Map.Entry<String, VersionedIssue> entry) {
+  Diagnostic taintDtoToDiagnostic(Map.Entry<String, VersionedIssue> entry) {
     var issue = entry.getValue().issue();
     return prepareDiagnostic(issue, entry.getKey(), false, focusOnNewCode);
+  }
+
+  Diagnostic taintDtoToDiagnostic(TaintVulnerabilityDto taint) {
+    var d = new Diagnostic();
+    d.setSeverity(taint.isOnNewCode() ? DiagnosticSeverity.Warning : DiagnosticSeverity.Hint);
+    // TODO compute source
+    d.setSource(SONARLINT_SOURCE);
+    d.setRange(Utils.convert(taint.getTextRange()));
+    d.setCode(taint.getRuleKey());
+    d.setMessage(taint.getMessage());
+    d.setData(taint.getId());
+    return d;
   }
 
 
@@ -126,6 +149,7 @@ public class DiagnosticPublisher {
     String serverIssueKey;
     @Nullable
     HotspotReviewStatus status;
+
     public void setEntryKey(String entryKey) {
       this.entryKey = entryKey;
     }
@@ -143,6 +167,7 @@ public class DiagnosticPublisher {
     }
 
   }
+
   public static void setSource(Diagnostic diagnostic, Issue issue) {
     if (issue instanceof DelegatingIssue delegatedIssue) {
       var isKnown = delegatedIssue.getServerIssueKey() != null;
@@ -189,30 +214,26 @@ public class DiagnosticPublisher {
 
     var localDiagnostics = localIssues.entrySet()
       .stream()
-      .map(this::convert);
-    // TODO get taints from the backend
-    // initializedBackend().getTaintVulnerabilityTrackingService().listAll(new ListAllParams(folderUri))
-//    var folderWrapperOptional = workspaceFoldersManager.findFolderForFile(uri);
-//    if (folderWrapperOptional.isPresent()) {
-//      var folderUri = folderWrapperOptional.get().getUri().toString();
-//      try {
-//        var taints = backendServiceFacade.listAllTaints(folderUri).get();
-//
-//      } catch (InterruptedException e) {
-//        throw new RuntimeException(e);
-//      } catch (ExecutionException e) {
-//        throw new RuntimeException(e);
-//      }
-//    }
-
-    var taintDiagnostics = taintVulnerabilitiesCache.getAsDiagnostics(newUri, focusOnNewCode);
-
-    var diagnosticList = Stream.concat(localDiagnostics, taintDiagnostics)
-      .sorted(DiagnosticPublisher.byLineNumber())
-      .toList();
-    p.setDiagnostics(diagnosticList);
-    p.setUri(newUri.toString());
-
+      .map(this::taintDtoToDiagnostic);
+    // TODO do we still need a Taints cache? We don't use it at the moment
+    var folderWrapperOpt = workspaceFoldersManager.findFolderForFile(newUri);
+    if (folderWrapperOpt.isPresent()) {
+      var workspaceFolderWrapper = folderWrapperOpt.get();
+      var folderUri = workspaceFolderWrapper.getUri().toString();
+      try {
+        var taints = backendServiceFacade.getBackendService().listAllTaints(folderUri).get().getTaintVulnerabilities();
+        var taintDiagnostics = taints.stream().map(this::taintDtoToDiagnostic);
+        var diagnosticList = Stream.concat(localDiagnostics, taintDiagnostics)
+          .sorted(DiagnosticPublisher.byLineNumber())
+          .toList();
+        p.setDiagnostics(diagnosticList);
+        p.setUri(newUri.toString());
+      } catch (InterruptedException e) {
+        throw new RuntimeException(e);
+      } catch (ExecutionException e) {
+        throw new RuntimeException(e);
+      }
+    }
     return p;
   }
 
@@ -221,7 +242,7 @@ public class DiagnosticPublisher {
 
     p.setDiagnostics(hotspotsCache.get(newUri).entrySet()
       .stream()
-      .map(this::convert)
+      .map(this::taintDtoToDiagnostic)
       .sorted(DiagnosticPublisher.byLineNumber())
       .toList());
     p.setUri(newUri.toString());

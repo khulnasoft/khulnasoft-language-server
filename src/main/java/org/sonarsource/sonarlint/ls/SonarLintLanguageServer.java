@@ -214,13 +214,14 @@ public class SonarLintLanguageServer implements SonarLintExtendedLanguageServer,
     this.notebookDiagnosticPublisher = new NotebookDiagnosticPublisher(client, issuesCache);
     this.openNotebooksCache = new OpenNotebooksCache(lsLogOutput, notebookDiagnosticPublisher);
     this.notebookDiagnosticPublisher.setOpenNotebooksCache(openNotebooksCache);
-    this.diagnosticPublisher = new DiagnosticPublisher(client, taintVulnerabilitiesCache, issuesCache, securityHotspotsCache, openNotebooksCache);
     this.progressManager = new ProgressManager(client, globalLogOutput);
     this.requestsHandlerServer = new RequestsHandlerServer(client);
     var vsCodeClient = new SonarLintVSCodeClient(client, requestsHandlerServer, globalLogOutput);
     this.backendServiceFacade = new BackendServiceFacade(vsCodeClient, lsLogOutput, client);
     vsCodeClient.setBackendServiceFacade(backendServiceFacade);
     this.workspaceFoldersManager = new WorkspaceFoldersManager(backendServiceFacade, globalLogOutput);
+    this.diagnosticPublisher = new DiagnosticPublisher(client, taintVulnerabilitiesCache, issuesCache,
+      securityHotspotsCache, openNotebooksCache, backendServiceFacade, workspaceFoldersManager);
     this.settingsManager = new SettingsManager(this.client, this.workspaceFoldersManager, backendServiceFacade, globalLogOutput);
     vsCodeClient.setSettingsManager(settingsManager);
     backendServiceFacade.setSettingsManager(settingsManager);
