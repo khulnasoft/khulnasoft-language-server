@@ -53,7 +53,22 @@
     </dependency>
     <dependency>
       <groupId>org.sonarsource.sonarlint.core</groupId>
-      <artifactId>sonarlint-embedded</artifactId>
+      <artifactId>sonarlint-java-client-legacy</artifactId>
+      <version>${sonarlint.core.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.sonarsource.sonarlint.core</groupId>
+      <artifactId>sonarlint-java-client-utils</artifactId>
+      <version>${sonarlint.core.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.sonarsource.sonarlint.core</groupId>
+      <artifactId>sonarlint-rpc-protocol</artifactId>
+      <version>${sonarlint.core.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.sonarsource.sonarlint.core</groupId>
+      <artifactId>sonarlint-rpc-impl</artifactId>
       <version>${sonarlint.core.version}</version>
     </dependency>
     <dependency>
