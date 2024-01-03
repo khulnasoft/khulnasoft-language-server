@@ -33,6 +33,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import org.eclipse.lsp4j.Diagnostic;
 import org.sonarsource.sonarlint.core.client.api.common.analysis.Issue;
+import org.sonarsource.sonarlint.core.client.legacy.analysis.RawIssue;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.hotspot.HotspotStatus;
 import org.sonarsource.sonarlint.ls.connected.DelegatingIssue;
 import org.sonarsource.sonarlint.ls.file.VersionedOpenFile;
@@ -69,13 +70,13 @@ public class IssuesCache {
     inProgressAnalysisIssuesPerIdPerFileURI.remove(versionedOpenFile.getUri());
   }
 
-  public void reportIssue(VersionedOpenFile versionedOpenFile, Issue issue) {
+  public void reportIssue(VersionedOpenFile versionedOpenFile, RawIssue issue) {
     var issueId = getIssueId(issue);
     inProgressAnalysisIssuesPerIdPerFileURI.computeIfAbsent(versionedOpenFile.getUri(), u -> new HashMap<>()).put(issueId,
       new VersionedIssue(issue, versionedOpenFile.getVersion()));
   }
 
-  private static String getIssueId(Issue issue) {
+  private static String getIssueId(RawIssue issue) {
     String issueId = null;
     if (issue instanceof DelegatingIssue delegatingIssue) {
       var issueUuid = delegatingIssue.getIssueId();
@@ -159,7 +160,7 @@ public class IssuesCache {
       .filter(Objects::nonNull);
   }
 
-  public record VersionedIssue(Issue issue, int documentVersion) {}
+  public record VersionedIssue(RawIssue issue, int documentVersion) {}
 
   public Map<String, VersionedIssue> get(URI fileUri) {
     return inProgressAnalysisIssuesPerIdPerFileURI.getOrDefault(fileUri, issuesPerIdPerFileURI.getOrDefault(fileUri, Map.of()));

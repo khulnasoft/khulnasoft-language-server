@@ -28,6 +28,8 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import org.jetbrains.annotations.NotNull;
 import org.sonarsource.sonarlint.core.analysis.api.ClientModulesProvider;
+import org.sonarsource.sonarlint.core.client.legacy.analysis.EngineConfiguration;
+import org.sonarsource.sonarlint.core.client.legacy.analysis.SonarLintAnalysisEngine;
 import org.sonarsource.sonarlint.core.commons.Language;
 import org.sonarsource.sonarlint.ls.log.LanguageClientLogOutput;
 import org.sonarsource.sonarlint.ls.settings.ServerConnectionSettings;
@@ -91,25 +93,22 @@ public class EnginesFactory {
     this.omnisharpDirectory = omnisharpDirectory;
   }
 
-  public StandaloneSonarLintEngine createStandaloneEngine() {
+  public SonarLintAnalysisEngine createEngine() {
     if (shutdown.get().equals(true)) {
       throw new IllegalStateException("Language server is shutting down, won't create engine");
     }
+
     logOutput.log("Starting standalone SonarLint engine...", ClientLogOutput.Level.DEBUG);
     logOutput.log(format("Using %d analyzers", standaloneAnalyzers.size()), ClientLogOutput.Level.DEBUG);
-
-    try {
-      var configuration = StandaloneGlobalConfiguration.builder()
+     try {
+      var configuration = EngineConfiguration.builder()
         .setSonarLintUserHome(sonarLintUserHomeOverride)
-        .addEnabledLanguages(STANDALONE_LANGUAGES)
-        .setNodeJs(nodeJsRuntime.getNodeJsPath(), nodeJsRuntime.getNodeJsVersion())
-        .addPlugins(standaloneAnalyzers.toArray(Path[]::new))
         .setModulesProvider(modulesProvider)
         .setExtraProperties(getExtraProperties())
-        .setLogOutput(logOutput)
+        .setLogOutput(null)
         .build();
 
-      var engine = newStandaloneEngine(configuration);
+      var engine = new SonarLintAnalysisEngine(configuration, )
       logOutput.log("Standalone SonarLint engine started", ClientLogOutput.Level.DEBUG);
       return engine;
     } catch (Exception e) {
