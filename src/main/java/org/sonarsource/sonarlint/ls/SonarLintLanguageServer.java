@@ -248,7 +248,7 @@ public class SonarLintLanguageServer implements SonarLintExtendedLanguageServer,
     this.moduleEventsProcessor = new ModuleEventsProcessor(standaloneEngineManager, workspaceFoldersManager, bindingManager, fileTypeClassifier, javaConfigCache);
     var analysisTaskExecutor = new AnalysisTaskExecutor(scmIgnoredCache, lsLogOutput, globalLogOutput, workspaceFoldersManager, bindingManager, javaConfigCache, settingsManager,
       fileTypeClassifier, issuesCache, securityHotspotsCache, taintVulnerabilitiesCache, telemetry, skippedPluginsNotifier, standaloneEngineManager, diagnosticPublisher,
-      client, openNotebooksCache, notebookDiagnosticPublisher, progressManager);
+      client, openNotebooksCache, notebookDiagnosticPublisher, progressManager, backendServiceFacade);
     this.analysisScheduler = new AnalysisScheduler(lsLogOutput, workspaceFoldersManager, bindingManager, openFilesCache, openNotebooksCache, analysisTaskExecutor, client);
     this.workspaceFoldersManager.addListener(moduleEventsProcessor);
     bindingManager.setAnalysisManager(analysisScheduler);

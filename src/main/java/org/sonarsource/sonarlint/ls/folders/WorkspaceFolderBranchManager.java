@@ -89,7 +89,7 @@ public class WorkspaceFolderBranchManager implements WorkspaceFolderLifecycleLis
   }
 
   public String matchSonarProjectBranch(String folderUri, String mainBranchName, Set<String> allBranchesNames, CancelChecker cancelChecker) {
-    var repo = GitUtils.getRepositoryForDir(Paths.get(folderUri), logOutput);
+    var repo = GitUtils.getRepositoryForDir(Paths.get(URI.create(folderUri)), logOutput);
     String electedBranchName = null;
     if (repo != null) {
       try (repo) {

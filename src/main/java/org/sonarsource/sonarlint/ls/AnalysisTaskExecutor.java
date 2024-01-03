@@ -48,8 +48,9 @@ import org.sonarsource.sonarlint.core.commons.RuleType;
 import org.sonarsource.sonarlint.core.commons.progress.CanceledException;
 import org.sonarsource.sonarlint.core.commons.progress.ClientProgressMonitor;
 import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageClient.GetJavaConfigResponse;
-import org.sonarsource.sonarlint.ls.connected.ProjectBindingManager;
+import org.sonarsource.sonarlint.ls.backend.BackendServiceFacade;
 import org.sonarsource.sonarlint.ls.connected.ProjectBinding;
+import org.sonarsource.sonarlint.ls.connected.ProjectBindingManager;
 import org.sonarsource.sonarlint.ls.connected.TaintVulnerabilitiesCache;
 import org.sonarsource.sonarlint.ls.file.FileTypeClassifier;
 import org.sonarsource.sonarlint.ls.file.VersionedOpenFile;
@@ -67,6 +68,7 @@ import org.sonarsource.sonarlint.ls.settings.WorkspaceFolderSettings;
 import org.sonarsource.sonarlint.ls.standalone.StandaloneEngineManager;
 import org.sonarsource.sonarlint.ls.telemetry.SonarLintTelemetry;
 import org.sonarsource.sonarlint.ls.util.FileUtils;
+import org.sonarsource.sonarlint.ls.util.Utils;
 
 import static java.lang.String.format;
 import static java.util.Optional.ofNullable;
@@ -100,12 +102,14 @@ public class AnalysisTaskExecutor {
   private final OpenNotebooksCache openNotebooksCache;
   private final NotebookDiagnosticPublisher notebookDiagnosticPublisher;
   private final ProgressManager progressManager;
+  private final BackendServiceFacade backendServiceFacade;
 
   public AnalysisTaskExecutor(ScmIgnoredCache filesIgnoredByScmCache, LanguageClientLogger clientLogger, LanguageClientLogOutput logOutput,
     WorkspaceFoldersManager workspaceFoldersManager, ProjectBindingManager bindingManager, JavaConfigCache javaConfigCache, SettingsManager settingsManager,
     FileTypeClassifier fileTypeClassifier, IssuesCache issuesCache, IssuesCache securityHotspotsCache, TaintVulnerabilitiesCache taintVulnerabilitiesCache,
     SonarLintTelemetry telemetry, SkippedPluginsNotifier skippedPluginsNotifier, StandaloneEngineManager standaloneEngineManager, DiagnosticPublisher diagnosticPublisher,
-    SonarLintExtendedLanguageClient lsClient, OpenNotebooksCache openNotebooksCache, NotebookDiagnosticPublisher notebookDiagnosticPublisher, ProgressManager progressManager) {
+    SonarLintExtendedLanguageClient lsClient, OpenNotebooksCache openNotebooksCache, NotebookDiagnosticPublisher notebookDiagnosticPublisher,
+    ProgressManager progressManager, BackendServiceFacade backendServiceFacade) {
     this.filesIgnoredByScmCache = filesIgnoredByScmCache;
     this.clientLogger = clientLogger;
     this.logOutput = logOutput;
@@ -125,6 +129,7 @@ public class AnalysisTaskExecutor {
     this.openNotebooksCache = openNotebooksCache;
     this.notebookDiagnosticPublisher = notebookDiagnosticPublisher;
     this.progressManager = progressManager;
+    this.backendServiceFacade = backendServiceFacade;
   }
 
   public void run(AnalysisTask task) {
@@ -288,19 +293,18 @@ public class AnalysisTaskExecutor {
       .orElse(findCommonPrefix(filesToAnalyze.keySet().stream().map(Paths::get).collect(toList())).toUri());
 
     var nonExcludedFiles = new HashMap<>(filesToAnalyze);
-    // TODO get exclusions from backend
-//    if (binding.isPresent()) {
-//      var connectedEngine = binding.get().getEngine();
-//      var excludedByServerConfiguration = connectedEngine.getExcludedFiles(binding.get().getBinding(),
-//        filesToAnalyze.keySet(),
-//        uri -> FileUtils.getFileRelativePath(Paths.get(baseDirUri), uri, logOutput),
-//        uri -> fileTypeClassifier.isTest(settings, uri, filesToAnalyze.get(uri).isJava(), () -> javaConfigCache.getOrFetch(uri)));
-//      excludedByServerConfiguration.forEach(f -> {
-//        clientLogger.debug(format("Skip analysis of file \"%s\" excluded by server configuration", f));
-//        nonExcludedFiles.remove(f);
-//        clearIssueCacheAndPublishEmptyDiagnostics(f);
-//      });
-//    }
+    binding.ifPresent(projectBinding -> {
+      var fileUrisByFolderUri = Map.of(baseDirUri.toString(), filesToAnalyze.keySet().stream().toList());
+      var excludedByServerConfiguration = backendServiceFacade.getBackendService().getFilesStatus(fileUrisByFolderUri);
+      var getFilesStatusResponse = Utils.safelyGetCompletableFuture(excludedByServerConfiguration, logOutput);
+      getFilesStatusResponse.ifPresent(filesStatusResponse -> filesStatusResponse.getFileStatuses().forEach((fileUri, fileStatus) -> {
+        if (fileStatus.isExcluded()) {
+          clientLogger.debug(format("Skip analysis of file \"%s\" excluded by server configuration", fileUri));
+          nonExcludedFiles.remove(fileUri);
+          clearIssueCacheAndPublishEmptyDiagnostics(fileUri);
+        }
+      }));
+    });
 
     if (!nonExcludedFiles.isEmpty()) {
       if (task.shouldShowProgress()) {
