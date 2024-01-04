@@ -39,8 +39,8 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javax.annotation.CheckForNull;
 import javax.annotation.Nullable;
-import org.sonarsource.sonarlint.core.client.api.connected.ConnectedSonarLintEngine;
-import org.sonarsource.sonarlint.core.commons.log.ClientLogOutput;
+import org.sonarsource.sonarlint.core.client.legacy.analysis.SonarLintAnalysisEngine;
+import org.sonarsource.sonarlint.core.client.utils.ClientLogOutput;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.config.binding.BindingConfigurationDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.config.binding.DidUpdateBindingParams;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.connection.projects.SonarProjectDto;
@@ -82,7 +82,7 @@ public class ProjectBindingManager implements WorkspaceSettingsChangeListener, W
   private final ConcurrentMap<URI, Optional<ProjectBinding>> folderBindingCache;
   private final LanguageClientLogOutput globalLogOutput;
   private final ConcurrentMap<URI, Optional<ProjectBinding>> fileBindingCache = new ConcurrentHashMap<>();
-  private final ConcurrentMap<String, Optional<ConnectedSonarLintEngine>> connectedEngineCacheByConnectionId;
+  private final ConcurrentMap<String, Optional<SonarLintAnalysisEngine>> connectedEngineCacheByConnectionId;
   private final SonarLintExtendedLanguageClient client;
   private final EnginesFactory enginesFactory;
   private AnalysisScheduler analysisManager;
@@ -102,7 +102,7 @@ public class ProjectBindingManager implements WorkspaceSettingsChangeListener, W
 
   public ProjectBindingManager(EnginesFactory enginesFactory, WorkspaceFoldersManager foldersManager, SettingsManager settingsManager, SonarLintExtendedLanguageClient client,
     ConcurrentMap<URI, Optional<ProjectBinding>> folderBindingCache, @Nullable LanguageClientLogOutput globalLogOutput,
-    ConcurrentMap<String, Optional<ConnectedSonarLintEngine>> connectedEngineCacheByConnectionId, TaintVulnerabilitiesCache taintVulnerabilitiesCache,
+    ConcurrentMap<String, Optional<SonarLintAnalysisEngine>> connectedEngineCacheByConnectionId, TaintVulnerabilitiesCache taintVulnerabilitiesCache,
     DiagnosticPublisher diagnosticPublisher, BackendServiceFacade backendServiceFacade,
     OpenNotebooksCache openNotebooksCache) {
     this.enginesFactory = enginesFactory;
@@ -231,19 +231,18 @@ public class ProjectBindingManager implements WorkspaceSettingsChangeListener, W
     return serverConnectionSettings;
   }
 
-  public Optional<ConnectedSonarLintEngine> getOrCreateConnectedEngine(String connectionId) {
+  public Optional<SonarLintAnalysisEngine> getOrCreateConnectedEngine(String connectionId) {
     return connectedEngineCacheByConnectionId.computeIfAbsent(connectionId,
       s -> Optional.ofNullable(createConnectedEngine(connectionId)));
   }
 
   @CheckForNull
-  private ConnectedSonarLintEngine createConnectedEngine(String connectionId) {
+  private SonarLintAnalysisEngine createConnectedEngine(String connectionId) {
     globalLogOutput.debug("Starting connected SonarLint engine for '%s'...", connectionId);
 
-    ConnectedSonarLintEngine engine;
+    SonarLintAnalysisEngine engine;
     try {
-      var serverConnectionSettings = settingsManager.getCurrentSettings().getServerConnections().get(connectionId);
-      engine = enginesFactory.createConnectedEngine(connectionId, serverConnectionSettings);
+      engine = enginesFactory.createEngine(connectionId);
     } catch (Exception e) {
       globalLogOutput.error("Error starting connected SonarLint engine for '" + connectionId + "'", e);
       return null;
@@ -397,7 +396,7 @@ public class ProjectBindingManager implements WorkspaceSettingsChangeListener, W
     connectedEngineCacheByConnectionId.forEach(this::tryStopServer);
   }
 
-  private void tryStopServer(String connectionId, Optional<ConnectedSonarLintEngine> engine) {
+  private void tryStopServer(String connectionId, Optional<SonarLintAnalysisEngine> engine) {
     engine.ifPresent(e -> {
       try {
         e.stop();
@@ -469,7 +468,7 @@ public class ProjectBindingManager implements WorkspaceSettingsChangeListener, W
     this.branchNameForFolderSupplier = getReferenceBranchNameForFolder;
   }
 
-  public String resolveBranchNameForFolder(@Nullable URI folder, ConnectedSonarLintEngine engine, String projectKey) {
+  public String resolveBranchNameForFolder(@Nullable URI folder, SonarLintAnalysisEngine engine, String projectKey) {
     // TODO use backend
     // return branchNameForFolderSupplier.apply(folder).orElse(engine.getServerBranches(projectKey).getMainBranchName());
     return "";

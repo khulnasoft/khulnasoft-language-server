@@ -27,7 +27,7 @@ import javax.annotation.CheckForNull;
 import org.sonarsource.sonarlint.core.analysis.api.ClientInputFile;
 import org.sonarsource.sonarlint.core.analysis.api.Flow;
 import org.sonarsource.sonarlint.core.analysis.api.QuickFix;
-import org.sonarsource.sonarlint.core.client.api.common.analysis.Issue;
+import org.sonarsource.sonarlint.core.client.legacy.analysis.Issue;
 import org.sonarsource.sonarlint.core.commons.CleanCodeAttribute;
 import org.sonarsource.sonarlint.core.commons.HotspotReviewStatus;
 import org.sonarsource.sonarlint.core.commons.ImpactSeverity;
@@ -36,7 +36,6 @@ import org.sonarsource.sonarlint.core.commons.RuleType;
 import org.sonarsource.sonarlint.core.commons.SoftwareQuality;
 import org.sonarsource.sonarlint.core.commons.TextRange;
 import org.sonarsource.sonarlint.core.commons.VulnerabilityProbability;
-import org.sonarsource.sonarlint.core.issuetracking.Trackable;
 
 public class DelegatingIssue implements Issue {
 

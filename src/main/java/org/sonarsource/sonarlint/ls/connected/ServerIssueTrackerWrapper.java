@@ -32,14 +32,14 @@ import java.util.function.Supplier;
 import javax.annotation.CheckForNull;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.jetbrains.annotations.NotNull;
-import org.sonarsource.sonarlint.core.client.api.common.analysis.Issue;
-import org.sonarsource.sonarlint.core.client.api.common.analysis.IssueListener;
-import org.sonarsource.sonarlint.core.client.api.connected.ConnectedSonarLintEngine;
+import org.sonarsource.sonarlint.core.client.legacy.analysis.Issue;
+import org.sonarsource.sonarlint.core.client.legacy.analysis.RawIssue;
+import org.sonarsource.sonarlint.core.client.legacy.analysis.RawIssueListener;
+import org.sonarsource.sonarlint.core.client.legacy.analysis.SonarLintAnalysisEngine;
 import org.sonarsource.sonarlint.core.commons.RuleType;
 import org.sonarsource.sonarlint.core.issuetracking.CachingIssueTracker;
 import org.sonarsource.sonarlint.core.issuetracking.InMemoryIssueTrackerCache;
 import org.sonarsource.sonarlint.core.issuetracking.IssueTrackerCache;
-import org.sonarsource.sonarlint.core.issuetracking.Trackable;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.tracking.ClientTrackedFindingDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.tracking.LineWithHashDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.tracking.LocalOnlyIssueDto;
@@ -47,8 +47,6 @@ import org.sonarsource.sonarlint.core.rpc.protocol.backend.tracking.ServerMatche
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.tracking.TextRangeWithHashDto;
 import org.sonarsource.sonarlint.core.rpc.protocol.backend.tracking.TrackWithServerIssuesParams;
 import org.sonarsource.sonarlint.core.serverapi.EndpointParams;
-import org.sonarsource.sonarlint.core.serverconnection.ProjectBinding;
-import org.sonarsource.sonarlint.core.tracking.IssueTrackable;
 import org.sonarsource.sonarlint.ls.AnalysisClientInputFile;
 import org.sonarsource.sonarlint.ls.backend.BackendServiceFacade;
 import org.sonarsource.sonarlint.ls.folders.WorkspaceFoldersManager;
@@ -60,7 +58,7 @@ import static org.sonarsource.sonarlint.ls.util.FileUtils.getTextRangeContentOfF
 
 public class ServerIssueTrackerWrapper {
 
-  private final ConnectedSonarLintEngine engine;
+  private final SonarLintAnalysisEngine engine;
   private final EndpointParams endpointParams;
   private final Supplier<String> getReferenceBranchNameForFolder;
   private final BackendServiceFacade backend;
@@ -73,7 +71,7 @@ public class ServerIssueTrackerWrapper {
   private final CachingIssueTracker cachingHotspotsTracker;
   private final String projectKey;
 
-  ServerIssueTrackerWrapper(ConnectedSonarLintEngine engine, EndpointParams endpointParams,
+  ServerIssueTrackerWrapper(SonarLintAnalysisEngine engine, EndpointParams endpointParams,
     String projectKey, Supplier<String> getReferenceBranchNameForFolder,
     BackendServiceFacade backend, WorkspaceFoldersManager workspaceFoldersManager, LanguageClientLogOutput logOutput) {
     this.engine = engine;
@@ -83,21 +81,12 @@ public class ServerIssueTrackerWrapper {
     this.workspaceFoldersManager = workspaceFoldersManager;
     this.backend = backend;
     this.logOutput = logOutput;
-    this.issueTrackerCache = new InMemoryIssueTrackerCache();
-    this.hotspotsTrackerCache = new InMemoryIssueTrackerCache();
-    this.cachingIssueTracker = new CachingIssueTracker(issueTrackerCache);
-    this.cachingHotspotsTracker = new CachingIssueTracker(hotspotsTrackerCache);
   }
 
-  public void matchAndTrack(String filePath, Collection<Issue> issues, IssueListener issueListener, boolean shouldFetchServerIssues) {
+  public void matchAndTrack(String filePath, Collection<RawIssue> issues, RawIssueListener issueListener, boolean shouldFetchServerIssues) {
     if (issues.isEmpty()) {
-      issueTrackerCache.put(filePath, Collections.emptyList());
       return;
     }
-
-    var issueTrackables = toIssueTrackables(issues);
-    cachingIssueTracker.matchAndTrackAsNew(filePath, issueTrackables);
-    cachingHotspotsTracker.matchAndTrackAsNew(filePath, toHotspotTrackables(issues));
 
     // TODO call backend IssueTrackingService.trackWithServerIssues() or another method for hostspots in HotspotTrackingService
 //    if (shouldFetchServerIssues) {
@@ -107,30 +96,30 @@ public class ServerIssueTrackerWrapper {
 //    }
 
     Optional<URI> workspaceFolderUri = getWorkspaceFolderUri(issues, workspaceFoldersManager);
-    workspaceFolderUri.ifPresent(uri -> matchAndTrackIssues(filePath, issueListener, shouldFetchServerIssues, issueTrackables, uri));
+    workspaceFolderUri.ifPresent(uri -> matchAndTrackIssues(filePath, issueListener, shouldFetchServerIssues, issues, uri));
     hotspotsTrackerCache.getLiveOrFail(filePath).stream()
       .filter(not(Trackable::isResolved))
       .forEach(trackable -> issueListener.handle(new DelegatingIssue(trackable)));
   }
 
-  private void matchAndTrackIssues(String filePath, IssueListener issueListener, boolean shouldFetchServerIssues,
-    Collection<Trackable> issueTrackables, URI workspaceFolderUri) {
-    var issuesByFilepath = getClientTrackedIssuesByServerRelativePath(filePath, issueTrackables);
+  private void matchAndTrackIssues(String filePath, RawIssueListener issueListener, boolean shouldFetchServerIssues,
+    Collection<RawIssue> rawIssues, URI workspaceFolderUri) {
+    var issuesByFilepath = getClientTrackedIssuesByServerRelativePath(filePath, rawIssues);
     var trackWithServerIssuesResponse = Utils.safelyGetCompletableFuture(backend.getBackendService().matchIssues(
       new TrackWithServerIssuesParams(workspaceFolderUri.toString(), issuesByFilepath, shouldFetchServerIssues)
     ), logOutput);
     trackWithServerIssuesResponse.ifPresentOrElse(
       // TODO migrate to new DTO
-      r -> matchAndTrackIssues(Path.of(filePath), issueListener, issueTrackables, r.getIssuesByServerRelativePath()),
-      () -> issueTrackables.stream().map(DelegatingIssue::new).forEach(issueListener::handle)
+      r -> matchAndTrackIssues(Path.of(filePath), issueListener, rawIssues, r.getIssuesByServerRelativePath()),
+      () -> rawIssues.forEach(issueListener::handle)
     );
   }
 
-  private static void matchAndTrackIssues(Path filePath, IssueListener issueListener, Collection<Trackable> currentTrackables,
+  private static void matchAndTrackIssues(Path filePath, RawIssueListener issueListener, Collection<RawIssue> rawIssues,
     Map<Path, List<Either<ServerMatchedIssueDto, LocalOnlyIssueDto>>> issuesByServerRelativePath) {
     //
     var eitherList = issuesByServerRelativePath.getOrDefault(filePath, Collections.emptyList());
-    Streams.zip(currentTrackables.stream(), eitherList.stream(), (issue, either) -> {
+    Streams.zip(rawIssues.stream(), eitherList.stream(), (issue, either) -> {
         if (either.isLeft()) {
           var serverIssue = either.getLeft();
           var issueSeverity = serverIssue.getOverriddenSeverity() == null ? issue.getSeverity() : serverIssue.getOverriddenSeverity();
@@ -147,12 +136,12 @@ public class ServerIssueTrackerWrapper {
 
 
   @NotNull
-  private static Map<Path, List<ClientTrackedFindingDto>> getClientTrackedIssuesByServerRelativePath(String filePath, Collection<Trackable> issueTrackables) {
+  private static Map<Path, List<ClientTrackedFindingDto>> getClientTrackedIssuesByServerRelativePath(String filePath, Collection<RawIssue> issueTrackables) {
     var clientTrackedIssueDtos = issueTrackables.stream().map(ServerIssueTrackerWrapper::createClientTrackedIssueDto).toList();
     return Map.of(Path.of(filePath), clientTrackedIssueDtos);
   }
 
-  static Optional<URI> getWorkspaceFolderUri(Collection<Issue> issues, WorkspaceFoldersManager workspaceFoldersManager) {
+  static Optional<URI> getWorkspaceFolderUri(Collection<RawIssue> issues, WorkspaceFoldersManager workspaceFoldersManager) {
     var anIssue = issues.stream().findFirst();
     if (anIssue.isPresent()) {
       var inputFile = anIssue.get().getInputFile();
@@ -167,17 +156,17 @@ public class ServerIssueTrackerWrapper {
   }
 
   @NotNull
-  private static ClientTrackedFindingDto createClientTrackedIssueDto(Trackable<Issue> issue) {
-    return new ClientTrackedFindingDto(null, issue.getServerIssueKey(), createTextRangeWithHashDto(issue), createLineWithHashDto(issue), issue.getRuleKey(), issue.getMessage());
+  private static ClientTrackedFindingDto createClientTrackedIssueDto(RawIssue issue) {
+    return new ClientTrackedFindingDto(null, issue.getSeverity().toString(), createTextRangeWithHashDto(issue), createLineWithHashDto(issue), issue.getRuleKey(), issue.getMessage());
   }
 
   @CheckForNull
-  static LineWithHashDto createLineWithHashDto(Trackable<Issue> issue) {
+  static LineWithHashDto createLineWithHashDto(RawIssue issue) {
     return issue.getLine() != null ? new LineWithHashDto(issue.getLine(), issue.getLineHash()) : null;
   }
 
   @CheckForNull
-  private static TextRangeWithHashDto createTextRangeWithHashDto(Trackable<Issue> issue) {
+  private static TextRangeWithHashDto createTextRangeWithHashDto(RawIssue issue) {
     var textRangeWithHash = issue.getTextRange();
     if (textRangeWithHash != null) {
       return new TextRangeWithHashDto(textRangeWithHash.getStartLine(), textRangeWithHash.getStartLineOffset(),
@@ -185,27 +174,6 @@ public class ServerIssueTrackerWrapper {
     }
     return null;
   }
-
-  static Collection<Trackable> toIssueTrackables(Collection<Issue> issues) {
-    return issues.stream()
-      .filter(it -> it.getType() != RuleType.SECURITY_HOTSPOT)
-      .map(issue -> {
-        var inputFile = issue.getInputFile() instanceof AnalysisClientInputFile actualInputFile ? actualInputFile : null;
-        if (inputFile != null) {
-          var fileLines = inputFile.contents().lines().toList();
-          var textRange = issue.getTextRange();
-          var textRangeContent = getTextRangeContentOfFile(fileLines, textRange);
-          var startLine = issue.getStartLine();
-          var lineContent = startLine != null ? fileLines.get(startLine - 1) : null;
-          return new IssueTrackable(issue, textRangeContent, lineContent);
-        }
-        return null;
-      })
-      .filter(Objects::nonNull)
-      .map(Trackable.class::cast)
-      .toList();
-  }
-
 
   private static Collection<Trackable> toHotspotTrackables(Collection<Issue> issues) {
     return issues.stream().filter(it -> it.getType() == RuleType.SECURITY_HOTSPOT)

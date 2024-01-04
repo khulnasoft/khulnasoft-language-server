@@ -29,7 +29,7 @@ import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.DiagnosticSeverity;
 import org.eclipse.lsp4j.PublishDiagnosticsParams;
 import org.eclipse.lsp4j.Range;
-import org.sonarsource.sonarlint.core.client.api.common.analysis.Issue;
+import org.sonarsource.sonarlint.core.client.legacy.analysis.Issue;
 import org.sonarsource.sonarlint.core.commons.HotspotReviewStatus;
 import org.sonarsource.sonarlint.core.commons.Language;
 import org.sonarsource.sonarlint.core.commons.RuleType;

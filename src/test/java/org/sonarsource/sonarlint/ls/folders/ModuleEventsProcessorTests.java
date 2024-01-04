@@ -33,7 +33,7 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.sonarsource.sonarlint.core.analysis.api.ClientModuleFileEvent;
-import org.sonarsource.sonarlint.core.client.api.standalone.StandaloneSonarLintEngine;
+import org.sonarsource.sonarlint.core.client.legacy.analysis.SonarLintAnalysisEngine;
 import org.sonarsource.sonarlint.ls.EnginesFactory;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingManager;
 import org.sonarsource.sonarlint.ls.file.FileTypeClassifier;
@@ -70,8 +70,8 @@ class ModuleEventsProcessorTests {
 
   @Test
   void dontForwardFileEventToEngineWhenOutsideOfFolder() throws Exception {
-    var sonarLintEngine = mock(StandaloneSonarLintEngine.class);
-    when(enginesFactory.createEngine()).thenReturn(sonarLintEngine);
+    var sonarLintEngine = mock(SonarLintAnalysisEngine.class);
+    when(enginesFactory.createEngine(null)).thenReturn(sonarLintEngine);
 
     underTest.didChangeWatchedFiles(List.of(new FileEvent("uri", FileChangeType.Created)));
 
@@ -84,13 +84,13 @@ class ModuleEventsProcessorTests {
   void forwardFileCreatedEventToEngineWhenInsideOfFolder() {
     var fileEventArgumentCaptor = ArgumentCaptor.forClass(ClientModuleFileEvent.class);
     var folderURI = URI.create("file:///folder");
-    var sonarLintEngine = mock(StandaloneSonarLintEngine.class);
-    when(enginesFactory.createEngine()).thenReturn(sonarLintEngine);
+    var sonarLintEngine = mock(SonarLintAnalysisEngine.class);
+    when(enginesFactory.createEngine(null)).thenReturn(sonarLintEngine);
     var folder = new WorkspaceFolderWrapper(folderURI, new WorkspaceFolder(folderURI.toString(), "folder"), logTester.getLogger());
     folder.setSettings(EMPTY_SETTINGS);
     when(foldersManager.findFolderForFile(any())).thenReturn(Optional.of(folder));
     when(sonarLintEngine.fireModuleFileEvent(any(), any())).thenReturn(CompletableFuture.completedFuture(null));
-    when(standaloneEngineManager.getOrCreateStandaloneEngine()).thenReturn(sonarLintEngine);
+    when(standaloneEngineManager.getOrCreateAnalysisEngine()).thenReturn(sonarLintEngine);
 
     underTest.didChangeWatchedFiles(List.of(new FileEvent("file:///folder/file.py", FileChangeType.Created)));
 
@@ -103,13 +103,13 @@ class ModuleEventsProcessorTests {
   void forwardFileModifiedEventToEngineWhenInsideOfFolder() {
     var fileEventArgumentCaptor = ArgumentCaptor.forClass(ClientModuleFileEvent.class);
     var folderURI = URI.create("file:///folder");
-    var sonarLintEngine = mock(StandaloneSonarLintEngine.class);
-    when(enginesFactory.createEngine()).thenReturn(sonarLintEngine);
+    var sonarLintEngine = mock(SonarLintAnalysisEngine.class);
+    when(enginesFactory.createEngine(null)).thenReturn(sonarLintEngine);
     var folder = new WorkspaceFolderWrapper(folderURI, new WorkspaceFolder(folderURI.toString(), "folder"), logTester.getLogger());
     folder.setSettings(EMPTY_SETTINGS);
     when(foldersManager.findFolderForFile(any())).thenReturn(Optional.of(folder));
     when(sonarLintEngine.fireModuleFileEvent(any(), any())).thenReturn(CompletableFuture.completedFuture(null));
-    when(standaloneEngineManager.getOrCreateStandaloneEngine()).thenReturn(sonarLintEngine);
+    when(standaloneEngineManager.getOrCreateAnalysisEngine()).thenReturn(sonarLintEngine);
 
     underTest.didChangeWatchedFiles(List.of(new FileEvent("file:///folder/file.py", FileChangeType.Changed)));
 
@@ -122,13 +122,13 @@ class ModuleEventsProcessorTests {
   void forwardFileDeletedEventToEngineWhenInsideOfFolder() {
     var fileEventArgumentCaptor = ArgumentCaptor.forClass(ClientModuleFileEvent.class);
     var folderURI = URI.create("file:///folder");
-    var sonarLintEngine = mock(StandaloneSonarLintEngine.class);
-    when(enginesFactory.createEngine()).thenReturn(sonarLintEngine);
+    var sonarLintEngine = mock(SonarLintAnalysisEngine.class);
+    when(enginesFactory.createEngine(null)).thenReturn(sonarLintEngine);
     var folder = new WorkspaceFolderWrapper(folderURI, new WorkspaceFolder(folderURI.toString(), "folder"), logTester.getLogger());
     folder.setSettings(EMPTY_SETTINGS);
     when(foldersManager.findFolderForFile(any())).thenReturn(Optional.of(folder));
     when(sonarLintEngine.fireModuleFileEvent(any(), any())).thenReturn(CompletableFuture.completedFuture(null));
-    when(standaloneEngineManager.getOrCreateStandaloneEngine()).thenReturn(sonarLintEngine);
+    when(standaloneEngineManager.getOrCreateAnalysisEngine()).thenReturn(sonarLintEngine);
 
     underTest.didChangeWatchedFiles(List.of(new FileEvent("file:///folder/file.py", FileChangeType.Deleted)));
 

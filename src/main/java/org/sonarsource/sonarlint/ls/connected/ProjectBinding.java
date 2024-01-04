@@ -21,17 +21,17 @@ package org.sonarsource.sonarlint.ls.connected;
 
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
-import org.sonarsource.sonarlint.core.client.api.connected.ConnectedSonarLintEngine;
+import org.sonarsource.sonarlint.core.client.legacy.analysis.SonarLintAnalysisEngine;
 
 
 public class ProjectBinding {
 
   private final String connectionId;
   private final String projectKey;
-  private final ConnectedSonarLintEngine engine;
+  private final SonarLintAnalysisEngine engine;
   private final ServerIssueTrackerWrapper issueTrackerWrapper;
 
-  public ProjectBinding(String connectionId, String projectKey, ConnectedSonarLintEngine engine, ServerIssueTrackerWrapper issueTrackerWrapper) {
+  public ProjectBinding(String connectionId, String projectKey, SonarLintAnalysisEngine engine, ServerIssueTrackerWrapper issueTrackerWrapper) {
     this.connectionId = connectionId;
     this.projectKey = projectKey;
     this.engine = engine;
@@ -46,7 +46,7 @@ public class ProjectBinding {
     return projectKey;
   }
 
-  public ConnectedSonarLintEngine getEngine() {
+  public SonarLintAnalysisEngine getEngine() {
     return engine;
   }
 

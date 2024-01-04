@@ -36,18 +36,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
-import org.sonarsource.sonarlint.core.analysis.AnalysisEngine;
-import org.sonarsource.sonarlint.core.analysis.api.AnalysisConfiguration;
-import org.sonarsource.sonarlint.core.analysis.api.AnalysisEngineConfiguration;
 import org.sonarsource.sonarlint.core.analysis.api.AnalysisResults;
 import org.sonarsource.sonarlint.core.analysis.api.ClientInputFile;
+import org.sonarsource.sonarlint.core.client.legacy.analysis.AnalysisConfiguration;
 import org.sonarsource.sonarlint.core.client.legacy.analysis.PluginDetails;
 import org.sonarsource.sonarlint.core.client.legacy.analysis.RawIssue;
 import org.sonarsource.sonarlint.core.client.legacy.analysis.RawIssueListener;
-import org.sonarsource.sonarlint.core.commons.RuleType;
 import org.sonarsource.sonarlint.core.commons.progress.CanceledException;
 import org.sonarsource.sonarlint.core.commons.progress.ClientProgressMonitor;
-import org.sonarsource.sonarlint.core.plugin.commons.LoadedPlugins;
 import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageClient.GetJavaConfigResponse;
 import org.sonarsource.sonarlint.ls.backend.BackendServiceFacade;
 import org.sonarsource.sonarlint.ls.connected.ProjectBinding;
@@ -72,7 +68,6 @@ import org.sonarsource.sonarlint.ls.util.FileUtils;
 import org.sonarsource.sonarlint.ls.util.Utils;
 
 import static java.lang.String.format;
-import static java.util.Collections.emptyMap;
 import static java.util.Optional.ofNullable;
 import static java.util.function.Function.identity;
 import static java.util.stream.Collectors.groupingBy;
@@ -479,30 +474,39 @@ public class AnalysisTaskExecutor {
     Map<URI, GetJavaConfigResponse> javaConfigs, RawIssueListener issueListener) {
     var baseDir = Paths.get(folderUri);
 
-    var configuration = buildCommonAnalysisConfiguration(settings, folderUri, filesToAnalyze, javaConfigs, baseDir, StandaloneAnalysisConfiguration.builder())
-      .addExcludedRules(settingsManager.getCurrentSettings().getExcludedRules())
-      .addIncludedRules(settingsManager.getCurrentSettings().getIncludedRules())
-      .addRuleParameters(settingsManager.getCurrentSettings().getRuleParameters())
+    var analysisClientInputFiles = filesToAnalyze.values()
+      .stream()
+      //Todo supply relative path and clientLanguageId
+      .map(versionedOpenFile -> new AnalysisClientInputFile(versionedOpenFile.getUri(), null, versionedOpenFile.getContent(), false, null))
+      .toList();
+    //Todo Check that we set all configuration that is needed
+    var configuration = AnalysisConfiguration.builder()
+      .addInputFiles(analysisClientInputFiles.toArray(new ClientInputFile[0]))
+      .setBaseDir(baseDir)
       .build();
 
     clientLogger.debug(format("Analysis triggered with configuration:%n%s", configuration.toString()));
 
-    var engine = standaloneEngineManager.getOrCreateStandaloneEngine();
-    return analyzeWithTiming(() -> engine.analyze(configuration, issueListener, null , new TaskProgressMonitor(task), folderUri.toString()),
-      engine.getPluginDetails(),
-      () -> {
-      });
+    var engine = standaloneEngineManager.getOrCreateAnalysisEngine();
+    return analyzeWithTiming(() -> engine.analyze(configuration, issueListener, logOutput , new TaskProgressMonitor(task), folderUri.toString()),
+      engine.getPluginDetails(), () -> {});
   }
 
-  private AnalysisResultsWrapper analyzeConnected(AnalysisTask task, ProjectBinding binding, WorkspaceFolderSettings settings, URI baseDirUri,
+  private AnalysisResultsWrapper analyzeConnected(AnalysisTask task, ProjectBinding binding, WorkspaceFolderSettings settings, URI folderUri,
     Map<URI, VersionedOpenFile> filesToAnalyze,
     Map<URI, GetJavaConfigResponse> javaConfigs, RawIssueListener issueListener, @Nullable ProgressFacade progressFacade) {
-    var baseDir = Paths.get(baseDirUri);
+    var baseDir = Paths.get(folderUri);
 
-    var configuration = AnalysisEngineConfiguration.builder()
-      .build();
-    buildCommonAnalysisConfiguration(settings, baseDirUri, filesToAnalyze, javaConfigs, baseDir, AnalysisConfiguration.builder())
-      .setProjectKey(settings.getProjectKey())
+    var analysisClientInputFiles = filesToAnalyze.values()
+      .stream()
+      //Todo supply relative path and clientLanguageId
+      .map(versionedOpenFile -> new AnalysisClientInputFile(versionedOpenFile.getUri(), null, versionedOpenFile.getContent(), false, null))
+      .toList();
+
+    //Todo Check if we set all connfiguration that is needed
+    var configuration = AnalysisConfiguration.builder()
+      .addInputFiles(analysisClientInputFiles.toArray(new ClientInputFile[0]))
+      .setBaseDir(baseDir)
       .build();
 
     if (settingsManager.getCurrentSettings().hasLocalRuleConfiguration()) {
@@ -510,7 +514,7 @@ public class AnalysisTaskExecutor {
     }
     clientLogger.debug(format("Analysis triggered with configuration:%n%s", configuration.toString()));
 
-    var engine = new AnalysisEngine(configuration, null, null);
+    var engine = binding.getEngine();
     var serverIssueTracker = binding.getServerIssueTracker();
     var issuesPerFiles = new HashMap<URI, List<RawIssue>>();
     RawIssueListener accumulatorIssueListener = i -> {
@@ -520,8 +524,9 @@ public class AnalysisTaskExecutor {
         issuesPerFiles.computeIfAbsent(inputFile.getClientObject(), uri -> new ArrayList<>()).add(i);
       }
     };
+
     var progressMonitor = progressFacade == null ? new TaskProgressMonitor(task) : progressFacade.asCoreMonitor();
-    return analyzeWithTiming(() -> engine.post(configuration, accumulatorIssueListener, new LanguageClientLogOutput(clientLogger, true), progressMonitor),
+    return analyzeWithTiming(() -> engine.analyze(configuration, accumulatorIssueListener, logOutput , progressMonitor, folderUri.toString()),
       engine.getPluginDetails(),
       () -> filesToAnalyze.forEach((fileUri, openFile) -> {
         var issues = issuesPerFiles.getOrDefault(fileUri, List.of());
