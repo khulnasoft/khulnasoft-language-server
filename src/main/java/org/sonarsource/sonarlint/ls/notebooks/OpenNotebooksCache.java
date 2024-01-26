@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -73,7 +73,7 @@ public class OpenNotebooksCache {
 
   public void didChange(URI fileUri, int version, NotebookDocumentChangeEvent changeEvent) {
     if (!openNotebooksPerFileURI.containsKey(fileUri)) {
-      lsLogOutput.warn(format("Illegal state. File '%s' is reported changed but we missed the open notification", fileUri));
+      lsLogOutput.warn(format("Illegal state. File \"%s\" is reported changed but we missed the open notification", fileUri));
     } else {
       var openNotebook = openNotebooksPerFileURI.get(fileUri);
       openNotebook.didChange(version, changeEvent);

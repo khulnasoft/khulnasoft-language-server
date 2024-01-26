@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -24,22 +24,27 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.DiagnosticSeverity;
 import org.eclipse.lsp4j.DidChangeTextDocumentParams;
 import org.eclipse.lsp4j.TextDocumentContentChangeEvent;
 import org.eclipse.lsp4j.VersionedTextDocumentIdentifier;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageClient.GetJavaConfigResponse;
 import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageServer.DidClasspathUpdateParams;
 import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageServer.DidJavaServerModeChangeParams;
 
+import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.apache.commons.lang3.StringUtils.appendIfMissing;
 import static org.apache.commons.lang3.StringUtils.removeEnd;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.groups.Tuple.tuple;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 class JavaMediumTests extends AbstractLanguageServerMediumTests {
 
@@ -63,11 +68,23 @@ class JavaMediumTests extends AbstractLanguageServerMediumTests {
       "productVersion", "0.1"));
   }
 
+  @Override
+  protected void setupGlobalSettings(Map<String, Object> globalSettings) {
+    client.readyForTestsLatch = new CountDownLatch(1);
+    setShowVerboseLogs(client.globalSettings, true);
+  }
+
+  @Override
+  protected void verifyConfigurationChangeOnClient() {
+    try {
+      assertTrue(client.readyForTestsLatch.await(15, SECONDS));
+    } catch (InterruptedException e) {
+      fail(e);
+    }
+  }
+
   @Test
   void analyseJavaFilesAsNonJavaIfNoClasspath() throws Exception {
-    setShowVerboseLogs(client.globalSettings, true);
-    notifyConfigurationChangeOnClient();
-
     var uri = getUri("skipJavaIfNoClasspath.java");
 
     client.javaConfigs.put(uri, null);
@@ -78,27 +95,24 @@ class JavaMediumTests extends AbstractLanguageServerMediumTests {
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
       .containsExactlyInAnyOrder(
         tuple(0, 13, 0, 16, "java:S1118", "sonarlint", "Add a private constructor to hide the implicit public one.", DiagnosticSeverity.Warning),
-        tuple(0, 0, 0, 0, "java:S1220", "sonarlint", "Move this file to a named package.", DiagnosticSeverity.Information),
+        tuple(0, 0, 0, 0, "java:S1220", "sonarlint", "Move this file to a named package.", DiagnosticSeverity.Warning),
         tuple(1, 35, 1, 55, "secrets:S6290", "sonarlint", "Make sure this AWS Access Key ID is not disclosed.", DiagnosticSeverity.Warning),
         tuple(3, 5, 3, 31, "java:S125", "sonarlint", "This block of commented-out lines of code should be removed.", DiagnosticSeverity.Warning)));
     awaitUntilAsserted(() -> assertThat(client.logs)
       .extracting(withoutTimestamp())
       .contains(
-        "[Debug] Analysis of Java file '" + uri + "' may not show all issues because SonarLint was unable to query project configuration (classpath, source level, ...)"));
+        "[Debug] Analysis of Java file \"" + uri + "\" may not show all issues because SonarLint was unable to query project configuration (classpath, source level, ...)"));
   }
 
   @Test
   void analyzeSimpleJavaFileReuseCachedClasspath() throws Exception {
-    setShowVerboseLogs(client.globalSettings, true);
-    notifyConfigurationChangeOnClient();
-
     var uri = getUri("analyzeSimpleJavaFileOnOpen.java");
 
     var javaConfigResponse = new GetJavaConfigResponse();
     javaConfigResponse.setProjectRoot(MODULE_1_ROOT_URI);
     javaConfigResponse.setSourceLevel("1.8");
     javaConfigResponse.setTest(false);
-    javaConfigResponse.setClasspath(new String[] {"/does/not/exist"});
+    javaConfigResponse.setClasspath(new String[]{"/does/not/exist"});
     client.javaConfigs.put(uri, javaConfigResponse);
 
     didOpen(uri, "java", "public class Foo {\n  public static void main() {\n  // System.out.println(\"foo\");\n}\n}");
@@ -107,11 +121,11 @@ class JavaMediumTests extends AbstractLanguageServerMediumTests {
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
       .containsExactlyInAnyOrder(
         tuple(0, 13, 0, 16, "java:S1118", "sonarlint", "Add a private constructor to hide the implicit public one.", DiagnosticSeverity.Warning),
-        tuple(0, 0, 0, 0, "java:S1220", "sonarlint", "Move this file to a named package.", DiagnosticSeverity.Information),
+        tuple(0, 0, 0, 0, "java:S1220", "sonarlint", "Move this file to a named package.", DiagnosticSeverity.Warning),
         tuple(2, 5, 2, 31, "java:S125", "sonarlint", "This block of commented-out lines of code should be removed.", DiagnosticSeverity.Warning)));
 
-    var ignoredMsg = "[Debug] Classpath '/does/not/exist' from configuration does not exist, skipped";
-    var cacheMsg = "[Debug] Cached Java config for file '" + uri + "'";
+    var ignoredMsg = "[Debug] Classpath \"/does/not/exist\" from configuration does not exist, skipped";
+    var cacheMsg = "[Debug] Cached Java config for file \"" + uri + "\"";
     assertThat(client.logs)
       .extracting(withoutTimestamp())
       .containsAll(List.of(ignoredMsg, cacheMsg));
@@ -124,8 +138,8 @@ class JavaMediumTests extends AbstractLanguageServerMediumTests {
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
       .containsExactlyInAnyOrder(
         tuple(0, 13, 0, 16, "java:S1118", "sonarlint", "Add a private constructor to hide the implicit public one.", DiagnosticSeverity.Warning),
-        tuple(0, 0, 0, 0, "java:S1220", "sonarlint", "Move this file to a named package.", DiagnosticSeverity.Information),
-        tuple(3, 2, 3, 12, "java:S106", "sonarlint", "Replace this use of System.out or System.err by a logger.", DiagnosticSeverity.Warning)));
+        tuple(0, 0, 0, 0, "java:S1220", "sonarlint", "Move this file to a named package.", DiagnosticSeverity.Warning),
+        tuple(3, 2, 3, 12, "java:S106", "sonarlint", "Replace this use of System.out by a logger.", DiagnosticSeverity.Warning)));
 
     assertThat(client.logs).extracting(withoutTimestamp()).doesNotContain(cacheMsg);
   }
@@ -161,7 +175,7 @@ class JavaMediumTests extends AbstractLanguageServerMediumTests {
       .containsExactlyInAnyOrder(
         tuple(7, 11, 7, 26, "java:S2259", "sonarlint", "\"NullPointerException\" will be thrown when invoking method \"doSomeThingWith()\". [+5 locations]",
           DiagnosticSeverity.Warning),
-        tuple(0, 0, 0, 0, "java:S1220", "sonarlint", "Move this file to a named package.", DiagnosticSeverity.Information)));
+        tuple(0, 0, 0, 0, "java:S1220", "sonarlint", "Move this file to a named package.", DiagnosticSeverity.Warning)));
   }
 
   @Test
@@ -170,7 +184,6 @@ class JavaMediumTests extends AbstractLanguageServerMediumTests {
     var currentJdkHome = javaHome.endsWith("jre") ? javaHome.getParent() : javaHome;
     var isModular = Files.exists(currentJdkHome.resolve("lib/jrt-fs.jar"));
 
-    setShowVerboseLogs(client.globalSettings, true);
     setShowAnalyzerLogs(client.globalSettings, true);
     notifyConfigurationChangeOnClient();
 
@@ -190,7 +203,7 @@ class JavaMediumTests extends AbstractLanguageServerMediumTests {
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
       .containsExactlyInAnyOrder(
         tuple(0, 13, 0, 16, "java:S1118", "sonarlint", "Add a private constructor to hide the implicit public one.", DiagnosticSeverity.Warning),
-        tuple(0, 0, 0, 0, "java:S1220", "sonarlint", "Move this file to a named package.", DiagnosticSeverity.Information),
+        tuple(0, 0, 0, 0, "java:S1220", "sonarlint", "Move this file to a named package.", DiagnosticSeverity.Warning),
         tuple(2, 5, 2, 31, "java:S125", "sonarlint", "This block of commented-out lines of code should be removed.", DiagnosticSeverity.Warning)));
 
     var jrtFsJarPath = currentJdkHome.resolve(isModular ? "lib/jrt-fs.jar" : "jre/lib/rt.jar").toString();
@@ -210,7 +223,7 @@ class JavaMediumTests extends AbstractLanguageServerMediumTests {
     javaConfigResponse.setProjectRoot(MODULE_1_ROOT_URI);
     javaConfigResponse.setSourceLevel("1.8");
     javaConfigResponse.setTest(true);
-    javaConfigResponse.setClasspath(new String[] {Paths.get(this.getClass().getResource("/junit-4.12.jar").toURI()).toAbsolutePath().toString()});
+    javaConfigResponse.setClasspath(new String[]{Paths.get(this.getClass().getResource("/junit-4.12.jar").toURI()).toAbsolutePath().toString()});
     client.javaConfigs.put(uri, javaConfigResponse);
 
     didOpen(uri, "java",
@@ -224,9 +237,6 @@ class JavaMediumTests extends AbstractLanguageServerMediumTests {
 
   @Test
   void testClassPathUpdateEvictCacheAndTriggersNewAnalysis(@TempDir Path projectRoot) throws Exception {
-    setShowVerboseLogs(client.globalSettings, true);
-    notifyConfigurationChangeOnClient();
-
     var uri = getUri("testClassPathUpdate.java");
 
     var projectRootUri = projectRoot.toUri().toString();
@@ -253,7 +263,7 @@ class JavaMediumTests extends AbstractLanguageServerMediumTests {
     client.logs.clear();
 
     // Update classpath
-    javaConfigResponse.setClasspath(new String[] {Paths.get(this.getClass().getResource("/junit-4.12.jar").toURI()).toAbsolutePath().toString()});
+    javaConfigResponse.setClasspath(new String[]{Paths.get(this.getClass().getResource("/junit-4.12.jar").toURI()).toAbsolutePath().toString()});
     lsProxy.didClasspathUpdate(new DidClasspathUpdateParams(projectRootUri2));
 
     awaitUntilAsserted(() -> assertThat(client.getDiagnostics(uri))
@@ -264,14 +274,11 @@ class JavaMediumTests extends AbstractLanguageServerMediumTests {
     assertThat(client.logs)
       .extracting(withoutTimestamp())
       .contains(
-        "[Debug] Evicted Java config cache for file '" + uri + "'");
+        "[Debug] Evicted Java config cache for file \"" + uri + "\"");
   }
 
   @Test
   void testJavaServerModeUpdateToStandardTriggersNewAnalysis() throws Exception {
-    setShowVerboseLogs(client.globalSettings, true);
-    notifyConfigurationChangeOnClient();
-
     var uri = getUri("testJavaServerModeUpdate.java");
 
     // Simulate null Java config response due to serverMode=LightWeight
@@ -279,16 +286,16 @@ class JavaMediumTests extends AbstractLanguageServerMediumTests {
 
     didOpen(uri, "java", "public class Foo {\n  public static void main() {\n  // System.out.println(\"foo\");\n}\n}");
 
+    awaitUntilAsserted(() -> assertThat(client.logs)
+      .extracting(withoutTimestamp())
+      .contains(
+        "[Debug] Analysis of Java file \"" + uri + "\" may not show all issues because SonarLint was unable to query project configuration (classpath, source level, ...)"));
     awaitUntilAsserted(() -> assertThat(client.getDiagnostics(uri))
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
       .containsExactlyInAnyOrder(
         tuple(0, 13, 0, 16, "java:S1118", "sonarlint", "Add a private constructor to hide the implicit public one.", DiagnosticSeverity.Warning),
-        tuple(0, 0, 0, 0, "java:S1220", "sonarlint", "Move this file to a named package.", DiagnosticSeverity.Information),
+        tuple(0, 0, 0, 0, "java:S1220", "sonarlint", "Move this file to a named package.", DiagnosticSeverity.Warning),
         tuple(2, 5, 2, 31, "java:S125", "sonarlint", "This block of commented-out lines of code should be removed.", DiagnosticSeverity.Warning)));
-    awaitUntilAsserted(() -> assertThat(client.logs)
-      .extracting(withoutTimestamp())
-      .contains(
-        "[Debug] Analysis of Java file '" + uri + "' may not show all issues because SonarLint was unable to query project configuration (classpath, source level, ...)"));
 
     // Prepare config response
     var javaConfigResponse = new GetJavaConfigResponse();
@@ -306,15 +313,12 @@ class JavaMediumTests extends AbstractLanguageServerMediumTests {
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
       .containsExactlyInAnyOrder(
         tuple(0, 13, 0, 16, "java:S1118", "sonarlint", "Add a private constructor to hide the implicit public one.", DiagnosticSeverity.Warning),
-        tuple(0, 0, 0, 0, "java:S1220", "sonarlint", "Move this file to a named package.", DiagnosticSeverity.Information),
+        tuple(0, 0, 0, 0, "java:S1220", "sonarlint", "Move this file to a named package.", DiagnosticSeverity.Warning),
         tuple(2, 5, 2, 31, "java:S125", "sonarlint", "This block of commented-out lines of code should be removed.", DiagnosticSeverity.Warning)));
   }
 
   @Test
   void shouldBatchAnalysisFromTheSameModule() throws Exception {
-    setShowVerboseLogs(client.globalSettings, true);
-    notifyConfigurationChangeOnClient();
-
     var file1module1 = getUri("Foo1.java");
     var file2module1 = getUri("Foo2.java");
     var nonJavaFilemodule1 = getUri("Another.py");
@@ -361,9 +365,6 @@ class JavaMediumTests extends AbstractLanguageServerMediumTests {
 
   @Test
   void shouldNotBatchAnalysisFromDifferentModules() throws Exception {
-    setShowVerboseLogs(client.globalSettings, true);
-    notifyConfigurationChangeOnClient();
-
     var file1module1 = getUri("file1.java");
     var file2module2 = getUri("file2.java");
 
@@ -408,7 +409,7 @@ class JavaMediumTests extends AbstractLanguageServerMediumTests {
         "[Info] Found 3 issues")
       // We don't know the order of analysis for the 2 files, so we can't have a single assertion
       .contains(
-        "[Info] Analyzing file '" + file1module1 + "'...",
-        "[Info] Analyzing file '" + file2module2 + "'..."));
+        "[Info] Analyzing file \"" + file1module1 + "\"...",
+        "[Info] Analyzing file \"" + file2module2 + "\"..."));
   }
 }

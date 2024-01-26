@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -31,12 +31,11 @@ import org.eclipse.lsp4j.jsonrpc.services.JsonRequest;
 import org.eclipse.lsp4j.jsonrpc.validation.NonNull;
 import org.eclipse.lsp4j.services.LanguageServer;
 import org.eclipse.lsp4j.util.Preconditions;
-import org.eclipse.xtext.xbase.lib.Pure;
 import org.sonarsource.sonarlint.core.clientapi.backend.analysis.GetSupportedFilePatternsResponse;
-import org.sonarsource.sonarlint.core.clientapi.backend.authentication.HelpGenerateUserTokenResponse;
 import org.sonarsource.sonarlint.core.clientapi.backend.binding.GetBindingSuggestionParams;
-import org.sonarsource.sonarlint.core.clientapi.backend.issue.AddIssueCommentParams;
-import org.sonarsource.sonarlint.core.clientapi.backend.issue.IssueStatus;
+import org.sonarsource.sonarlint.core.clientapi.backend.connection.auth.HelpGenerateUserTokenResponse;
+import org.sonarsource.sonarlint.core.clientapi.backend.issue.ReopenIssueResponse;
+import org.sonarsource.sonarlint.core.clientapi.backend.issue.ResolutionStatus;
 import org.sonarsource.sonarlint.core.clientapi.client.binding.GetBindingSuggestionsResponse;
 
 public interface SonarLintExtendedLanguageServer extends LanguageServer {
@@ -48,12 +47,44 @@ public interface SonarLintExtendedLanguageServer extends LanguageServer {
   CompletableFuture<SonarLintExtendedLanguageClient.ConnectionCheckResult> checkConnection(ConnectionCheckParams connectionId);
 
   class ConnectionCheckParams {
+    @Nullable
     private String connectionId;
+
+    @Nullable
+    private String token;
+
+    @Nullable
+    private String organization;
+
+    @Nullable
+    private String serverUrl;
 
     public ConnectionCheckParams(String connectionId) {
       this.connectionId = connectionId;
     }
 
+    public ConnectionCheckParams(String token, String organization, String serverUrl) {
+      this.token = token;
+      this.serverUrl = serverUrl;
+      this.organization = organization;
+    }
+
+    @Nullable
+    public String getToken() {
+      return token;
+    }
+
+    @Nullable
+    public String getOrganization() {
+      return organization;
+    }
+
+    @Nullable
+    public String getServerUrl() {
+      return serverUrl;
+    }
+
+    @Nullable
     public String getConnectionId() {
       return connectionId;
     }
@@ -94,7 +125,6 @@ public interface SonarLintExtendedLanguageServer extends LanguageServer {
       this.projectUri = Preconditions.<String>checkNotNull(projectUri, "projectUri");
     }
 
-    @Pure
     @NonNull
     public String getProjectUri() {
       return projectUri;
@@ -144,7 +174,6 @@ public interface SonarLintExtendedLanguageServer extends LanguageServer {
       this.serverMode = Preconditions.<String>checkNotNull(serverMode, "serverMode");
     }
 
-    @Pure
     @NonNull
     public String getServerMode() {
       return serverMode;
@@ -190,8 +219,26 @@ public interface SonarLintExtendedLanguageServer extends LanguageServer {
   @JsonNotification("sonarlint/didLocalBranchNameChange")
   void didLocalBranchNameChange(DidLocalBranchNameChangeParams params);
 
+  class OnTokenUpdateNotificationParams {
+    private final String connectionId;
+    private final String token;
+
+    public OnTokenUpdateNotificationParams(String connectionId, String token) {
+      this.connectionId = connectionId;
+      this.token = token;
+    }
+
+    public String getToken() {
+      return token;
+    }
+
+    public String getConnectionId() {
+      return connectionId;
+    }
+  }
+
   @JsonNotification("sonarlint/onTokenUpdate")
-  void onTokenUpdate();
+  void onTokenUpdate(OnTokenUpdateNotificationParams onTokenUpdateNotificationParams);
 
   class GetRemoteProjectsNamesParams {
     private String connectionId;
@@ -360,36 +407,39 @@ public interface SonarLintExtendedLanguageServer extends LanguageServer {
   @JsonNotification("sonarlint/forgetFolderHotspots")
   CompletableFuture<Void> forgetFolderHotspots();
 
-  class FolderUriParams {
-    private final String folderUri;
+  class UriParams {
+    private final String uri;
 
-    public FolderUriParams(String folderUri) {
-      this.folderUri = folderUri;
+    public UriParams(String uri) {
+      this.uri = uri;
     }
 
-    public String getFolderUri() {
-      return folderUri;
+    public String getUri() {
+      return uri;
     }
   }
 
   @JsonRequest("sonarlint/listSupportedFilePatterns")
-  CompletableFuture<GetSupportedFilePatternsResponse> getFilePatternsForAnalysis(FolderUriParams params);
+  CompletableFuture<GetSupportedFilePatternsResponse> getFilePatternsForAnalysis(UriParams params);
 
   @JsonRequest("sonarlint/getBindingSuggestion")
   CompletableFuture<GetBindingSuggestionsResponse> getBindingSuggestion(GetBindingSuggestionParams params);
 
   class ChangeIssueStatusParams {
     private final String configurationScopeId;
-    private final String issueKey;
-    private final IssueStatus newStatus;
+    private final String issueId;
+    private final String newStatus;
     private final String fileUri;
+    private final String comment;
     private final boolean isTaintIssue;
 
-    public ChangeIssueStatusParams(String configurationScopeId, String issueKey, IssueStatus newStatus, String fileUri, boolean isTaintIssue) {
+    public ChangeIssueStatusParams(String configurationScopeId, @Nullable String issueId, String newStatus, String fileUri,
+      @Nullable String comment, boolean isTaintIssue) {
       this.configurationScopeId = configurationScopeId;
-      this.issueKey = issueKey;
+      this.issueId = issueId;
       this.newStatus = newStatus;
       this.fileUri = fileUri;
+      this.comment = comment;
       this.isTaintIssue = isTaintIssue;
     }
 
@@ -397,11 +447,12 @@ public interface SonarLintExtendedLanguageServer extends LanguageServer {
       return configurationScopeId;
     }
 
-    public String getIssueKey() {
-      return issueKey;
+    @CheckForNull
+    public String getIssueId() {
+      return issueId;
     }
 
-    public IssueStatus getNewStatus() {
+    public String getNewStatus() {
       return newStatus;
     }
 
@@ -409,16 +460,63 @@ public interface SonarLintExtendedLanguageServer extends LanguageServer {
       return fileUri;
     }
 
+    public String getComment() {
+      return comment;
+    }
+
     public boolean isTaintIssue() {
       return isTaintIssue;
     }
   }
 
+  @JsonRequest("sonarlint/checkIssueStatusChangePermitted")
+  CompletableFuture<CheckIssueStatusChangePermittedResponse> checkIssueStatusChangePermitted(CheckIssueStatusChangePermittedParams params);
+
+  class CheckIssueStatusChangePermittedParams {
+    String folderUri;
+    String issueKey;
+
+    public CheckIssueStatusChangePermittedParams(String folderUri, String issueKey) {
+      this.folderUri = folderUri;
+      this.issueKey = issueKey;
+    }
+
+    public String getFolderUri() {
+      return folderUri;
+    }
+
+    public String getIssueKey() {
+      return issueKey;
+    }
+  }
+  class CheckIssueStatusChangePermittedResponse {
+    private final boolean permitted;
+    private final String notPermittedReason;
+    private final List<String> allowedStatuses;
+
+    public CheckIssueStatusChangePermittedResponse(boolean permitted, @Nullable String notPermittedReason, List<String> allowedStatuses) {
+      this.permitted = permitted;
+      this.notPermittedReason = notPermittedReason;
+      this.allowedStatuses = allowedStatuses;
+    }
+
+    public boolean isPermitted() {
+      return permitted;
+    }
+
+    @CheckForNull
+    public String getNotPermittedReason() {
+      return notPermittedReason;
+    }
+
+    public List<String> getAllowedStatuses() {
+      return allowedStatuses;
+    }
+  }
+
+
   @JsonNotification("sonarlint/changeIssueStatus")
   CompletableFuture<Void> changeIssueStatus(ChangeIssueStatusParams params);
-
-  @JsonNotification("sonarlint/addIssueComment")
-  CompletableFuture<Void> addIssueComment(AddIssueCommentParams params);
 
   class CheckLocalDetectionSupportedResponse {
     boolean isSupported;
@@ -441,7 +539,7 @@ public interface SonarLintExtendedLanguageServer extends LanguageServer {
   }
 
   @JsonRequest("sonarlint/checkLocalDetectionSupported")
-  CompletableFuture<CheckLocalDetectionSupportedResponse> checkLocalDetectionSupported(FolderUriParams params);
+  CompletableFuture<CheckLocalDetectionSupportedResponse> checkLocalDetectionSupported(UriParams params);
 
 
   @JsonRequest("sonarlint/getHotspotDetails")
@@ -528,5 +626,70 @@ public interface SonarLintExtendedLanguageServer extends LanguageServer {
       return this.allowedStatuses;
     }
   }
+
+  @JsonNotification("sonarlint/reopenResolvedLocalIssues")
+  CompletableFuture<ReopenIssueResponse> reopenResolvedLocalIssues(ReopenAllIssuesForFileParams params);
+
+  class ReopenAllIssuesForFileParams {
+    private final String relativePath;
+    private final String fileUri;
+    private final String configurationScopeId;
+
+    public ReopenAllIssuesForFileParams(String relativePath, String fileUri, String configurationScopeId) {
+      this.relativePath = relativePath;
+      this.fileUri = fileUri;
+      this.configurationScopeId = configurationScopeId;
+    }
+
+    public String getRelativePath() {
+      return relativePath;
+    }
+
+    public String getFileUri() {
+      return fileUri;
+    }
+
+    public String getConfigurationScopeId() {
+      return configurationScopeId;
+    }
+  }
+
+  class AnalyseOpenFileIgnoringExcludesParams {
+    private final TextDocumentItem textDocument;
+    private final String notebookUri;
+    private final Integer notebookVersion;
+    private final List<TextDocumentItem> notebookCells;
+
+    public AnalyseOpenFileIgnoringExcludesParams(@Nullable TextDocumentItem textDocument,
+      @Nullable String notebookUri, @Nullable Integer notebookVersion, @Nullable List<TextDocumentItem> notebookCells) {
+      this.textDocument = textDocument;
+      this.notebookUri = notebookUri;
+      this.notebookVersion = notebookVersion;
+      this.notebookCells = notebookCells;
+    }
+
+    @CheckForNull
+    public TextDocumentItem getTextDocument() {
+      return textDocument;
+    }
+
+    @CheckForNull
+    public String getNotebookUri() {
+      return notebookUri;
+    }
+
+    @CheckForNull
+    public Integer getNotebookVersion() {
+      return notebookVersion;
+    }
+
+    @CheckForNull
+    public List<TextDocumentItem> getNotebookCells() {
+      return notebookCells;
+    }
+  }
+
+  @JsonNotification("sonarlint/analyseOpenFileIgnoringExcludes")
+  CompletableFuture<Void> analyseOpenFileIgnoringExcludes(AnalyseOpenFileIgnoringExcludesParams params);
 
 }

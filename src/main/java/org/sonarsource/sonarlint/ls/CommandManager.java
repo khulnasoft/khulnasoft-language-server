@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -33,6 +33,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.eclipse.lsp4j.CodeAction;
 import org.eclipse.lsp4j.CodeActionKind;
 import org.eclipse.lsp4j.CodeActionParams;
@@ -56,25 +57,31 @@ import org.eclipse.lsp4j.jsonrpc.messages.ResponseErrorCode;
 import org.jetbrains.annotations.NotNull;
 import org.sonarsource.sonarlint.core.analysis.api.ClientInputFileEdit;
 import org.sonarsource.sonarlint.core.analysis.api.QuickFix;
+import org.sonarsource.sonarlint.core.clientapi.backend.issue.CheckStatusChangePermittedParams;
+import org.sonarsource.sonarlint.core.clientapi.backend.rules.AbstractRuleDto;
 import org.sonarsource.sonarlint.core.clientapi.backend.rules.GetStandaloneRuleDescriptionResponse;
 import org.sonarsource.sonarlint.core.clientapi.backend.rules.RuleDescriptionTabDto;
 import org.sonarsource.sonarlint.core.clientapi.backend.rules.RuleMonolithicDescriptionDto;
+import org.sonarsource.sonarlint.core.clientapi.backend.rules.RuleParamDefinitionDto;
 import org.sonarsource.sonarlint.core.clientapi.backend.rules.RuleSplitDescriptionDto;
+import org.sonarsource.sonarlint.core.commons.CleanCodeAttribute;
 import org.sonarsource.sonarlint.core.commons.TextRange;
-import org.sonarsource.sonarlint.core.commons.log.SonarLintLogger;
 import org.sonarsource.sonarlint.core.serverapi.UrlUtils;
 import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageClient.ShowRuleDescriptionParams;
 import org.sonarsource.sonarlint.ls.backend.BackendServiceFacade;
 import org.sonarsource.sonarlint.ls.commands.ShowAllLocationsCommand;
 import org.sonarsource.sonarlint.ls.connected.DelegatingIssue;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingManager;
+import org.sonarsource.sonarlint.ls.connected.ProjectBindingWrapper;
 import org.sonarsource.sonarlint.ls.connected.TaintVulnerabilitiesCache;
 import org.sonarsource.sonarlint.ls.connected.sync.ServerSynchronizer;
 import org.sonarsource.sonarlint.ls.folders.WorkspaceFoldersManager;
+import org.sonarsource.sonarlint.ls.log.LanguageClientLogOutput;
 import org.sonarsource.sonarlint.ls.notebooks.OpenNotebooksCache;
 import org.sonarsource.sonarlint.ls.notebooks.VersionedOpenNotebook;
 import org.sonarsource.sonarlint.ls.settings.SettingsManager;
 import org.sonarsource.sonarlint.ls.telemetry.SonarLintTelemetry;
+import org.sonarsource.sonarlint.ls.util.Utils;
 
 import static java.net.URI.create;
 import static org.sonarsource.sonarlint.ls.AnalysisScheduler.SONARCLOUD_TAINT_SOURCE;
@@ -115,10 +122,12 @@ public class CommandManager {
   private final BackendServiceFacade backendServiceFacade;
   private final WorkspaceFoldersManager workspaceFoldersManager;
   private final OpenNotebooksCache openNotebooksCache;
+  private final LanguageClientLogOutput logOutput;
 
   CommandManager(SonarLintExtendedLanguageClient client, SettingsManager settingsManager, ProjectBindingManager bindingManager, ServerSynchronizer serverSynchronizer,
     SonarLintTelemetry telemetry, TaintVulnerabilitiesCache taintVulnerabilitiesCache, IssuesCache issuesCache,
-    IssuesCache securityHotspotsCache, BackendServiceFacade backendServiceFacade, WorkspaceFoldersManager workspaceFoldersManager, OpenNotebooksCache openNotebooksCache) {
+    IssuesCache securityHotspotsCache, BackendServiceFacade backendServiceFacade, WorkspaceFoldersManager workspaceFoldersManager,
+    OpenNotebooksCache openNotebooksCache, LanguageClientLogOutput logOutput) {
     this.client = client;
     this.settingsManager = settingsManager;
     this.bindingManager = bindingManager;
@@ -130,6 +139,7 @@ public class CommandManager {
     this.backendServiceFacade = backendServiceFacade;
     this.workspaceFoldersManager = workspaceFoldersManager;
     this.openNotebooksCache = openNotebooksCache;
+    this.logOutput = logOutput;
   }
 
   public List<Either<Command, CodeAction>> computeCodeActions(CodeActionParams params, CancelChecker cancelToken) {
@@ -162,25 +172,24 @@ public class CommandManager {
     var hasBinding = binding.isPresent();
     if (issueForDiagnostic.isPresent()) {
       var versionedIssue = issueForDiagnostic.get();
-      ruleContextKey = versionedIssue.getIssue().getRuleDescriptionContextKey().orElse("");
+      ruleContextKey = versionedIssue.issue().getRuleDescriptionContextKey().orElse("");
       var quickFixes = isNotebookCellUri && versionedOpenNotebook.isPresent() ?
-        versionedOpenNotebook.get().toCellIssue(versionedIssue.getIssue()).quickFixes() :
-        versionedIssue.getIssue().quickFixes();
+        versionedOpenNotebook.get().toCellIssue(versionedIssue.issue()).quickFixes() :
+        versionedIssue.issue().quickFixes();
       cancelToken.checkCanceled();
       quickFixes.forEach(fix -> {
         var newCodeAction = new CodeAction(SONARLINT_ACTION_PREFIX + fix.message());
         newCodeAction.setKind(CodeActionKind.QuickFix);
         newCodeAction.setDiagnostics(List.of(diagnostic));
-        newCodeAction.setEdit(newWorkspaceEdit(fix, versionedIssue.getDocumentVersion()));
+        newCodeAction.setEdit(newWorkspaceEdit(fix, versionedIssue.documentVersion()));
         newCodeAction.setCommand(new Command(fix.message(), SONARLINT_QUICK_FIX_APPLIED, List.of(ruleKey)));
         codeActions.add(Either.forRight(newCodeAction));
       });
 
-      var isDelegatingIssue = versionedIssue.getIssue() instanceof DelegatingIssue;
-      var serverIssueKey = isDelegatingIssue ? ((DelegatingIssue) versionedIssue.getIssue()).getServerIssueKey() : null;
-      if (hasBinding && serverIssueKey != null) {
-        var resolveIssueAction = createResolveIssueCodeAction(diagnostic, ruleKey, serverIssueKey, uri, false);
-        codeActions.add(Either.forRight(resolveIssueAction));
+      if (hasBinding) {
+        var projectBindingWrapper = binding.get();
+        var resolveIssueCodeAction = createResolveIssueCodeAction(diagnostic, uri, projectBindingWrapper, ruleKey, versionedIssue);
+        resolveIssueCodeAction.ifPresent(ca -> codeActions.add(Either.forRight(ca)));
       }
     }
     addRuleDescriptionCodeAction(params, codeActions, diagnostic, ruleKey, ruleContextKey);
@@ -191,22 +200,41 @@ public class CommandManager {
     }
   }
 
+  private Optional<CodeAction> createResolveIssueCodeAction(Diagnostic diagnostic, URI uri, ProjectBindingWrapper binding, String ruleKey,
+    IssuesCache.VersionedIssue versionedIssue) {
+    var isDelegatingIssue = versionedIssue.issue() instanceof DelegatingIssue;
+    var delegatingIssue = isDelegatingIssue ? ((DelegatingIssue) versionedIssue.issue()) : null;
+    if (delegatingIssue != null && delegatingIssue.getIssueId() != null) {
+      var issueId = delegatingIssue.getIssueId();
+      var serverIssueKey = delegatingIssue.getServerIssueKey();
+      var key = serverIssueKey == null ? issueId.toString() : serverIssueKey;
+      var changeStatusPermittedResponse =
+        Utils.safelyGetCompletableFuture(backendServiceFacade.getBackendService().checkChangeIssueStatusPermitted(
+          new CheckStatusChangePermittedParams(binding.getConnectionId(), key)
+        ), logOutput);
+      if (changeStatusPermittedResponse.isPresent() && changeStatusPermittedResponse.get().isPermitted()) {
+        return Optional.of(createResolveIssueCodeAction(diagnostic, ruleKey, key, uri, false));
+      }
+    }
+    return Optional.empty();
+  }
+
   @NotNull
-  private CodeAction createResolveIssueCodeAction(Diagnostic diagnostic, String ruleKey, String serverIssueKey,  URI fileUri, boolean isTaintIssue) {
+  private CodeAction createResolveIssueCodeAction(Diagnostic diagnostic, String ruleKey, String issueId,  URI fileUri, boolean isTaintIssue) {
     var workspace = workspaceFoldersManager.findFolderForFile(fileUri).orElseThrow(() -> new IllegalStateException("No workspace found"));
     var workspaceUri = workspace.getUri();
-    var resolveIssueAction = new CodeAction(String.format(SONARLINT_ACTION_PREFIX + "Resolve this issue violating rule '%s'", ruleKey));
-    resolveIssueAction.setKind(CodeActionKind.QuickFix);
+    var resolveIssueAction = new CodeAction(String.format(SONARLINT_ACTION_PREFIX + "Resolve issue violating rule '%s' as...", ruleKey));
+    resolveIssueAction.setKind(CodeActionKind.Empty);
     resolveIssueAction.setDiagnostics(List.of(diagnostic));
-    resolveIssueAction.setCommand(new Command("Resolve this issue", RESOLVE_ISSUE, List.of(workspaceUri.toString(), serverIssueKey, fileUri, isTaintIssue)));
+    resolveIssueAction.setCommand(new Command("Resolve this issue", RESOLVE_ISSUE, List.of(workspaceUri.toString(), issueId, fileUri, isTaintIssue)));
     return resolveIssueAction;
   }
 
   private static void addShowAllLocationsCodeAction(IssuesCache.VersionedIssue versionedIssue,
     List<Either<Command, CodeAction>> codeActions, Diagnostic diagnostic, String ruleKey, boolean isNotebook) {
-    if (!versionedIssue.getIssue().flows().isEmpty() && !isNotebook) {
+    if (!versionedIssue.issue().flows().isEmpty() && !isNotebook) {
       var titleShowAllLocations = String.format("Show all locations for issue '%s'", ruleKey);
-      codeActions.add(newQuickFix(diagnostic, titleShowAllLocations, ShowAllLocationsCommand.ID, List.of(ShowAllLocationsCommand.params(versionedIssue.getIssue()))));
+      codeActions.add(newQuickFix(diagnostic, titleShowAllLocations, ShowAllLocationsCommand.ID, List.of(ShowAllLocationsCommand.params(versionedIssue.issue()))));
     }
   }
 
@@ -283,7 +311,7 @@ public class CommandManager {
   public Map<String, List<Rule>> listAllStandaloneRules() {
     var result = new HashMap<String, List<Rule>>();
     try {
-      return backendServiceFacade.listAllStandaloneRulesDefinitions()
+      return backendServiceFacade.getBackendService().listAllStandaloneRulesDefinitions()
         .thenApply(response -> {
           response.getRulesByKey().forEach((ruleKey, ruleDefinition) -> {
             var languageName = ruleDefinition.getLanguage().getLabel();
@@ -292,7 +320,7 @@ public class CommandManager {
           return result;
         }).get();
     } catch (InterruptedException e) {
-      interrupted(e);
+      interrupted(e, logOutput);
       return Map.of();
     } catch (ExecutionException e) {
       throw new IllegalStateException("Failed to list all standalone rules", e);
@@ -305,12 +333,12 @@ public class CommandManager {
   }
 
   private void openStandaloneRuleDescription(String ruleKey) {
-    backendServiceFacade.getStandaloneRuleDetails(ruleKey)
+    backendServiceFacade.getBackendService().getStandaloneRuleDetails(ruleKey)
       .thenAccept(detailsResponse -> showStandaloneRuleDescription(ruleKey, detailsResponse))
       .exceptionally(e -> {
         var message = "Can't show rule details for unknown rule with key: " + ruleKey;
         client.showMessage(new MessageParams(MessageType.Error, message));
-        SonarLintLogger.get().error(message, e);
+        logOutput.error(message, e);
         return null;
       });
   }
@@ -323,32 +351,51 @@ public class CommandManager {
       .map(w -> w.get().getUri().toString())
       .orElse(null);
 
-    return backendServiceFacade.getEffectiveRuleDetails(workspaceFolder, ruleKey, ruleContextKey)
+    return backendServiceFacade.getBackendService().getEffectiveRuleDetails(workspaceFolder, ruleKey, ruleContextKey)
       .thenApply(detailsResponse -> {
-        var ruleName = detailsResponse.details().getName();
-        var htmlDescription = getHtmlDescription(detailsResponse.details().getDescription());
-        var htmlDescriptionTabs = getHtmlDescriptionTabs(detailsResponse.details().getDescription(), ruleContextKey);
-        var type = detailsResponse.details().getType();
-        var severity = detailsResponse.details().getSeverity();
-        var languageKey = detailsResponse.details().getLanguage().getLanguageKey();
-        return new ShowRuleDescriptionParams(ruleKey, ruleName, htmlDescription, htmlDescriptionTabs, type, languageKey, severity, Collections.emptyList());
+        var ruleDetailsDto = detailsResponse.details();
+        return createShowRuleDescriptionParams(ruleDetailsDto, Collections.emptyMap(), ruleDetailsDto.getDescription(), ruleKey,
+          ruleContextKey);
       }).exceptionally(e -> {
         var message = "Can't show rule details for unknown rule with key: " + ruleKey;
         client.showMessage(new MessageParams(MessageType.Error, message));
-        SonarLintLogger.get().error(message, e);
+        logOutput.error(message, e);
         return null;
       });
   }
 
   private void showStandaloneRuleDescription(String ruleKey, GetStandaloneRuleDescriptionResponse ruleDetails) {
-    var ruleName = ruleDetails.getRuleDefinition().getName();
-    var htmlDescription = getHtmlDescription(ruleDetails.getDescription());
-    var htmlDescriptionTabs = getHtmlDescriptionTabs(ruleDetails.getDescription(), "");
-    var type = ruleDetails.getRuleDefinition().getType();
-    var severity = ruleDetails.getRuleDefinition().getDefaultSeverity();
-    var languageKey = ruleDetails.getRuleDefinition().getLanguage().getLanguageKey();
-    var paramDetails = ruleDetails.getRuleDefinition().getParamsByKey();
-    client.showRuleDescription(new ShowRuleDescriptionParams(ruleKey, ruleName, htmlDescription, htmlDescriptionTabs, type, languageKey, severity, paramDetails));
+    var ruleDefinition = ruleDetails.getRuleDefinition();
+    var paramDetails = ruleDefinition.getParamsByKey();
+    var showRuleDescriptionParams = createShowRuleDescriptionParams(ruleDefinition, paramDetails, ruleDetails.getDescription(), ruleKey,
+      "");
+    client.showRuleDescription(showRuleDescriptionParams);
+  }
+
+  private static ShowRuleDescriptionParams createShowRuleDescriptionParams(AbstractRuleDto ruleDetailsDto,
+    Map<String, RuleParamDefinitionDto> params, Either<RuleMonolithicDescriptionDto, RuleSplitDescriptionDto> description,
+    String ruleKey, String ruleContextKey) {
+    var ruleName = ruleDetailsDto.getName();
+    var type = ruleDetailsDto.getType();
+    var severity = ruleDetailsDto.getSeverity();
+    var languageKey = ruleDetailsDto.getLanguage().getLanguageKey();
+    var cleanCodeAttributeAndCategory = getCleanCodeAttributeAndCategory(ruleDetailsDto.getCleanCodeAttribute().orElse(null));
+    var cleanCodeAttributeParam = cleanCodeAttributeAndCategory.getLeft();
+    var cleanCodeAttributeCategoryParam = cleanCodeAttributeAndCategory.getRight();
+    var impacts = ruleDetailsDto.getDefaultImpacts().entrySet().stream()
+      .collect(Collectors.toMap(entry -> entry.getKey().getDisplayLabel(), entry -> entry.getValue().getDisplayLabel()));
+    var htmlDescription = getHtmlDescription(description);
+    var htmlDescriptionTabs = getHtmlDescriptionTabs(description, ruleContextKey);
+    return new ShowRuleDescriptionParams(ruleKey, ruleName, htmlDescription, htmlDescriptionTabs, type, languageKey, severity, params,
+      cleanCodeAttributeParam, cleanCodeAttributeCategoryParam, impacts);
+  }
+
+  private static ImmutablePair<String, String> getCleanCodeAttributeAndCategory(@Nullable CleanCodeAttribute cleanCodeAttribute) {
+    if (cleanCodeAttribute != null) {
+      var attributeCategory = cleanCodeAttribute.getAttributeCategory();
+      return new ImmutablePair<>(cleanCodeAttribute.getIssueLabel(), attributeCategory.getIssueLabel());
+    }
+    return new ImmutablePair<>("", "");
   }
 
   public void executeCommand(ExecuteCommandParams params, CancelChecker cancelToken) {
@@ -413,10 +460,10 @@ public class CommandManager {
     var issueKey = getAsString(params.getArguments().get(1));
     var issue = securityHotspotsCache.get(create(fileUri)).get(issueKey);
     if (issue == null) {
-      SonarLintLogger.get().error("Hotspot is not found during showing flows");
+      logOutput.error("Hotspot is not found during showing flows");
       return;
     }
-    var hotspot = issue.getIssue();
+    var hotspot = issue.issue();
     client.showIssueOrHotspot(ShowAllLocationsCommand.params(hotspot));
   }
 

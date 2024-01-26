@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -52,14 +52,13 @@ import org.sonarsource.sonarlint.ls.AnalysisScheduler;
 import org.sonarsource.sonarlint.ls.DiagnosticPublisher;
 import org.sonarsource.sonarlint.ls.EnginesFactory;
 import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageClient;
+import org.sonarsource.sonarlint.ls.backend.BackendService;
 import org.sonarsource.sonarlint.ls.backend.BackendServiceFacade;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingManager;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingWrapper;
 import org.sonarsource.sonarlint.ls.connected.TaintVulnerabilitiesCache;
-import org.sonarsource.sonarlint.ls.connected.events.ServerSentEventsHandlerService;
 import org.sonarsource.sonarlint.ls.folders.WorkspaceFolderWrapper;
 import org.sonarsource.sonarlint.ls.folders.WorkspaceFoldersManager;
-import org.sonarsource.sonarlint.ls.http.ApacheHttpClientProvider;
 import org.sonarsource.sonarlint.ls.log.LanguageClientLogOutput;
 import org.sonarsource.sonarlint.ls.notebooks.OpenNotebooksCache;
 import org.sonarsource.sonarlint.ls.progress.ProgressManager;
@@ -91,10 +90,11 @@ class ServerSynchronizerTests {
   private static final ProjectBinding FAKE_BINDING2 = new ProjectBinding(PROJECT_KEY2, "sqPrefix2", "idePrefix2");
   private static final String CONNECTION_ID = "myServer";
   private static final String CONNECTION_ID2 = "myServer2";
-  private static final ApacheHttpClientProvider httpClientProvider = mock(ApacheHttpClientProvider.class);
-  private static final ServerConnectionSettings GLOBAL_SETTINGS = new ServerConnectionSettings(CONNECTION_ID, "http://foo", "token", null, true, httpClientProvider);
-  private static final ServerConnectionSettings GLOBAL_SETTINGS_DIFFERENT_SERVER_ID = new ServerConnectionSettings(CONNECTION_ID2, "http://foo2", "token2", null, true,
-    httpClientProvider);
+  private static final BackendServiceFacade backendServiceFacade = mock(BackendServiceFacade.class);
+  private final BackendService backendService = mock(BackendService.class);
+  private static final ServerConnectionSettings GLOBAL_SETTINGS = new ServerConnectionSettings(CONNECTION_ID, "http://foo", "token", null, true);
+  private static final ServerConnectionSettings GLOBAL_SETTINGS_DIFFERENT_SERVER_ID = new ServerConnectionSettings(CONNECTION_ID2, "http://foo2", "token2", null, true
+  );
   private static final WorkspaceFolderSettings UNBOUND_SETTINGS = new WorkspaceFolderSettings(null, null, Collections.emptyMap(), null, null);
   private static final WorkspaceFolderSettings BOUND_SETTINGS = new WorkspaceFolderSettings(CONNECTION_ID, PROJECT_KEY, Collections.emptyMap(), null, null);
   private static final WorkspaceFolderSettings BOUND_SETTINGS2 = new WorkspaceFolderSettings(CONNECTION_ID2, PROJECT_KEY2, Collections.emptyMap(), null, null);
@@ -125,8 +125,6 @@ class ServerSynchronizerTests {
   private Runnable syncTask;
   private TaintVulnerabilitiesCache taintVulnerabilitiesCache;
   private DiagnosticPublisher diagnosticPublisher;
-  private ServerSentEventsHandlerService serverSentEventsHandler = mock(ServerSentEventsHandlerService.class);
-  private final BackendServiceFacade backendServiceFacade = mock(BackendServiceFacade.class);
 
   @BeforeEach
   public void prepare() throws IOException, ExecutionException, InterruptedException {
@@ -158,20 +156,20 @@ class ServerSynchronizerTests {
     folderBindingCache = new ConcurrentHashMap<>();
     taintVulnerabilitiesCache = mock(TaintVulnerabilitiesCache.class);
     diagnosticPublisher = mock(DiagnosticPublisher.class);
-    bindingManager = new ProjectBindingManager(enginesFactory, foldersManager, settingsManager, client, mock(LanguageClientLogOutput.class),
+    bindingManager = new ProjectBindingManager(enginesFactory, foldersManager, settingsManager, client, logTester.getLogger(),
       taintVulnerabilitiesCache, diagnosticPublisher, backendServiceFacade, mock(OpenNotebooksCache.class));
     syncTimer = mock(Timer.class);
     var syncTaskCaptor = ArgumentCaptor.forClass(TimerTask.class);
-    underTest = new ServerSynchronizer(client, new ProgressManager(client), bindingManager, analysisManager, syncTimer);
+    underTest = new ServerSynchronizer(client, new ProgressManager(client, logTester.getLogger()), bindingManager, analysisManager, syncTimer, backendServiceFacade, logTester.getLogger());
     verify(syncTimer).scheduleAtFixedRate(syncTaskCaptor.capture(), anyLong(), anyLong());
     syncTask = syncTaskCaptor.getValue();
     bindingManager.setAnalysisManager(analysisManager);
     bindingManager.setBranchResolver(uri -> Optional.of("master"));
-    bindingManager.setServerSentEventsHandler(serverSentEventsHandler);
+    when(backendServiceFacade.getBackendService()).thenReturn(backendService);
   }
 
   private static WorkspaceSettings newWorkspaceSettingsWithServers(Map<String, ServerConnectionSettings> servers) {
-    return new WorkspaceSettings(false, servers, Collections.emptyList(), Collections.emptyList(), Collections.emptyMap(), false, false, "");
+    return new WorkspaceSettings(false, servers, Collections.emptyList(), Collections.emptyList(), Collections.emptyMap(), false, false, "", false);
   }
 
   @Test
@@ -285,7 +283,7 @@ class ServerSynchronizerTests {
 
     verify(analysisManager).analyzeAllOpenFilesInFolder(folder);
     verifyNoMoreInteractions(analysisManager);
-    assertThat(logTester.logs(ClientLogOutput.Level.ERROR)).contains("The specified connection id '" + CONNECTION_ID + "' doesn't exist.");
+    assertThat(logTester.logs(MessageType.Log)).anyMatch(log -> log.contains("The specified connection id '" + CONNECTION_ID + "' doesn't exist."));
   }
 
   @Test
@@ -310,7 +308,7 @@ class ServerSynchronizerTests {
     when(folderSettings.getConnectionId()).thenReturn(connectionId);
     when(folderSettings.getProjectKey()).thenReturn(projectKey);
     when(settingsManager.getCurrentSettings()).thenReturn(settings);
-    var serverConnectionSettings = new ServerConnectionSettings("serverId", "serverUrl", "token", "organizationKey", true, httpClientProvider);
+    var serverConnectionSettings = new ServerConnectionSettings("serverId", "serverUrl", "token", "organizationKey", true);
     when(settings.getServerConnections()).thenReturn(Map.of(connectionId, serverConnectionSettings));
     when(enginesFactory.createConnectedEngine(connectionId, serverConnectionSettings)).thenReturn(fakeEngine);
     when(settingsManager.getCurrentSettings()).thenReturn(settings);
@@ -373,13 +371,13 @@ class ServerSynchronizerTests {
   }
 
   private WorkspaceFolderWrapper mockFileInAFolder() {
-    var folderWrapper = spy(new WorkspaceFolderWrapper(workspaceFolderPath.toUri(), new WorkspaceFolder(workspaceFolderPath.toUri().toString())));
+    var folderWrapper = spy(new WorkspaceFolderWrapper(workspaceFolderPath.toUri(), new WorkspaceFolder(workspaceFolderPath.toUri().toString()), logTester.getLogger()));
     when(foldersManager.findFolderForFile(fileInAWorkspaceFolderPath.toUri())).thenReturn(Optional.of(folderWrapper));
     return folderWrapper;
   }
 
   private WorkspaceFolderWrapper mockFileInAFolder2() {
-    var folderWrapper2 = spy(new WorkspaceFolderWrapper(workspaceFolderPath2.toUri(), new WorkspaceFolder(workspaceFolderPath2.toUri().toString())));
+    var folderWrapper2 = spy(new WorkspaceFolderWrapper(workspaceFolderPath2.toUri(), new WorkspaceFolder(workspaceFolderPath2.toUri().toString()), logTester.getLogger()));
     when(foldersManager.findFolderForFile(fileInAWorkspaceFolderPath2.toUri())).thenReturn(Optional.of(folderWrapper2));
     return folderWrapper2;
   }

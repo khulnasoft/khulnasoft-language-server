@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -29,17 +29,20 @@ import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.sonarsource.sonarlint.core.client.api.connected.ConnectedSonarLintEngine;
 import org.sonarsource.sonarlint.core.client.api.connected.ProjectBranches;
+import org.sonarsource.sonarlint.core.serverapi.EndpointParams;
 import org.sonarsource.sonarlint.core.serverconnection.ProjectBinding;
 import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageClient;
+import org.sonarsource.sonarlint.ls.backend.BackendService;
 import org.sonarsource.sonarlint.ls.backend.BackendServiceFacade;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingManager;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingWrapper;
-import org.sonarsource.sonarlint.ls.settings.ServerConnectionSettings;
 import testutils.ImmediateExecutorService;
+import testutils.SonarLintLogTester;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -48,17 +51,22 @@ import static org.mockito.Mockito.when;
 
 class WorkspaceFolderBranchManagerTests {
 
+  @RegisterExtension
+  SonarLintLogTester logTester = new SonarLintLogTester();
   private SonarLintExtendedLanguageClient client;
   private ProjectBindingManager bindingManager;
   private BackendServiceFacade backendServiceFacade;
   private WorkspaceFolderBranchManager underTest;
+  private BackendService backendService;
 
   @BeforeEach
   void setUp() {
     client = mock(SonarLintExtendedLanguageClient.class);
     bindingManager = mock(ProjectBindingManager.class);
     backendServiceFacade = mock(BackendServiceFacade.class);
-    underTest = new WorkspaceFolderBranchManager(client, bindingManager, backendServiceFacade, new ImmediateExecutorService());
+    backendService = mock(BackendService.class);
+    when(backendServiceFacade.getBackendService()).thenReturn(backendService);
+    underTest = new WorkspaceFolderBranchManager(client, bindingManager, backendServiceFacade, new ImmediateExecutorService(), logTester.getLogger());
   }
 
   @Test
@@ -135,7 +143,7 @@ class WorkspaceFolderBranchManagerTests {
     createAndCheckoutBranch(gitProjectBasedir, "branchName");
     var folderUri = gitProjectBasedir.toUri();
     var bindingWrapper = mock(ProjectBindingWrapper.class);
-    when(bindingManager.getServerConfigurationFor("connectionId")).thenReturn(mock(ServerConnectionSettings.EndpointParamsAndHttpClient.class));
+    when(bindingManager.getEndpointParamsFor("connectionId")).thenReturn(mock(EndpointParams.class));
     when(bindingManager.getBindingAndRepublishTaints(folderUri)).thenReturn(Optional.of(bindingWrapper));
     var engine = mock(ConnectedSonarLintEngine.class);
     when(bindingWrapper.getEngine()).thenReturn(engine);
@@ -146,7 +154,7 @@ class WorkspaceFolderBranchManagerTests {
 
     underTest.didBranchNameChange(folderUri, "branchName");
 
-    verify(backendServiceFacade).notifyBackendOnBranchChanged(folderUri.toString(), "branchName");
+    verify(backendService).notifyBackendOnBranchChanged(folderUri.toString(), "branchName");
   }
 
   private void createAndCheckoutBranch(Path gitProjectBasedir, String currentBranchName) throws IOException, GitAPIException {

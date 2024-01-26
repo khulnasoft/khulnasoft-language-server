@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -27,15 +27,28 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.PosixFilePermission;
+import java.util.Arrays;
 import java.util.HashSet;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
+import org.sonarsource.sonarlint.core.commons.TextRange;
+import testutils.SonarLintLogTester;
 
+import static java.util.Collections.emptyList;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.fail;
+import static org.sonarsource.sonarlint.ls.util.FileUtils.OS_NAME_PROPERTY;
+import static org.sonarsource.sonarlint.ls.util.FileUtils.getTextRangeContentOfFile;
 
 class FileUtilsTests {
+
+  @RegisterExtension
+  SonarLintLogTester logTester = new SonarLintLogTester();
+  private static boolean WINDOWS = System.getProperty(OS_NAME_PROPERTY) != null && System.getProperty(OS_NAME_PROPERTY).startsWith("Windows");
 
   @Test
   void allRelativePathsForFilesInTree_should_find_all_files(@TempDir Path basedir) {
@@ -52,7 +65,7 @@ class FileUtilsTests {
     createNewFile(basedir.resolve("a/b"), "b.txt");
     createNewFile(basedir.resolve("a/b/c"), "c.txt");
 
-    var relativePaths = FileUtils.allRelativePathsForFilesInTree(basedir);
+    var relativePaths = FileUtils.allRelativePathsForFilesInTree(basedir, logTester.getLogger());
     assertThat(relativePaths).containsExactlyInAnyOrder(
       "a/a.txt",
       "a/b/b.txt",
@@ -64,8 +77,39 @@ class FileUtilsTests {
     var deeplyNestedDir = basedir.resolve("a").resolve("b").resolve("c");
     assertThat(deeplyNestedDir).doesNotExist();
 
-    var relativePaths = FileUtils.allRelativePathsForFilesInTree(deeplyNestedDir);
+    var relativePaths = FileUtils.allRelativePathsForFilesInTree(deeplyNestedDir, logTester.getLogger());
     assertThat(relativePaths).isEmpty();
+  }
+
+  @Test
+  void allRelativePathsForFilesInTree_should_ignore_restricted_folder(@TempDir Path basedir) throws IOException {
+    var deeplyNestedDir = basedir.resolve("a").resolve("b").resolve("c");
+    assertThat(deeplyNestedDir.toFile().isDirectory()).isFalse();
+    FileUtils.mkdirs(deeplyNestedDir);
+    FileUtils.mkdirs(basedir.resolve(".git").resolve("refs"));
+    FileUtils.mkdirs(basedir.resolve("a").resolve(".config"));
+
+    createNewFile(basedir, ".gitignore");
+    createNewFile(basedir.resolve(".git/refs"), "HEAD");
+    createNewFile(basedir.resolve("a"), "a.txt");
+    createNewFile(basedir.resolve("a/.config"), "test");
+    createNewFile(basedir.resolve("a/b"), "b.txt");
+    createNewFile(basedir.resolve("a/b/c"), "c.txt");
+
+//    basedir.resolve("a/b/c").toFile().setReadable(false);
+    var perms = new HashSet<>(Arrays.asList(PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE,
+      PosixFilePermission.GROUP_EXECUTE, PosixFilePermission.OTHERS_EXECUTE));
+
+    if (WINDOWS) {
+      Files.setAttribute(basedir.resolve("a/b/c"), "dos:hidden", true);
+    } else {
+      Files.setPosixFilePermissions(basedir.resolve("a/b/c"), perms);
+    }
+
+    var relativePaths = FileUtils.allRelativePathsForFilesInTree(basedir, logTester.getLogger());
+    assertThat(relativePaths).containsExactlyInAnyOrder(
+      "a/a.txt",
+      "a/b/b.txt");
   }
 
   @Test
@@ -111,6 +155,48 @@ class FileUtilsTests {
     assertThrows(IllegalStateException.class, () -> {
       FileUtils.mkdirs(file);
     });
+  }
+
+  @Test
+  void getTextRangeContentOfFileTest() {
+    var content = "package devoxx.vulnerability;\n" +
+      "\n" +
+      "import java.sql.Connection;\n" +
+      "import java.sql.SQLException;\n" +
+      "import java.sql.Statement;\n" +
+      "\n" +
+      "public class InjectionVulnerability {\n" +
+      "  final static String SELECT_SQL = \"select FNAME, LNAME, SSN from USERS where UNAME = \";\n" +
+      "\n" +
+      "  public InjectionVulnerability(String taintedString) throws SQLException {\n" +
+      "    Connection con = DatabaseHelper.getJDBCConnection();\n" +
+      "    Statement stmt = con.createStatement();\n" +
+      "    int i = 0;\n" +
+      "    stmt.execute(SELECT_SQL + taintedString); // Noncompliant\n" +
+      "  }\n" +
+      "}\n";
+
+    var textRangeContent = getTextRangeContentOfFile(content.lines().collect(Collectors.toList()), new TextRange(12, 21, 12, 42));
+    var multiLineTextRangeContent = getTextRangeContentOfFile(content.lines().collect(Collectors.toList()), new TextRange(12, 21, 14, 60));
+
+    assertThat(getTextRangeContentOfFile(emptyList(), null)).isNull();
+    assertThat(textRangeContent).isEqualTo("con.createStatement()");
+    assertThat(multiLineTextRangeContent).isEqualTo("con.createStatement();" + System.lineSeparator()
+      + "    int i = 0;" + System.lineSeparator() + "    stmt.execute(SELECT_SQL + taintedString); // Noncomplian");
+  }
+
+  @Test
+  void shouldHandleOutOfBoundsTextRange() {
+    var content = "package devoxx.vulnerability;\n" +
+      "\n" +
+      "// TODO implement the TODO bellow\n" +
+      "// TODO implement this class";
+    var textRangeContent = getTextRangeContentOfFile(content.lines().collect(Collectors.toList()), new TextRange(3, 0, 2, 666));
+    var multiLineTextRangeContent = getTextRangeContentOfFile(content.lines().collect(Collectors.toList()), new TextRange(3, 0, 4, 666));
+
+    assertThat(textRangeContent).isEqualTo("// TODO implement the TODO bellow" + System.lineSeparator());
+    assertThat(multiLineTextRangeContent).isEqualTo("// TODO implement the TODO bellow" + System.lineSeparator()
+      + "// TODO implement this class");
   }
 
   private File createNewFile(Path basedir, String filename) {

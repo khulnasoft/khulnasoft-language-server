@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -82,7 +82,8 @@ import static org.sonarsource.sonarlint.ls.util.Utils.pluralize;
 public class AnalysisTaskExecutor {
 
   private final ScmIgnoredCache filesIgnoredByScmCache;
-  private final LanguageClientLogger lsLogOutput;
+  private final LanguageClientLogger clientLogger;
+  private final LanguageClientLogOutput logOutput;
   private final WorkspaceFoldersManager workspaceFoldersManager;
   private final ProjectBindingManager bindingManager;
   private final JavaConfigCache javaConfigCache;
@@ -100,13 +101,14 @@ public class AnalysisTaskExecutor {
   private final NotebookDiagnosticPublisher notebookDiagnosticPublisher;
   private final ProgressManager progressManager;
 
-  public AnalysisTaskExecutor(ScmIgnoredCache filesIgnoredByScmCache, LanguageClientLogger lsLogOutput,
+  public AnalysisTaskExecutor(ScmIgnoredCache filesIgnoredByScmCache, LanguageClientLogger clientLogger, LanguageClientLogOutput logOutput,
     WorkspaceFoldersManager workspaceFoldersManager, ProjectBindingManager bindingManager, JavaConfigCache javaConfigCache, SettingsManager settingsManager,
     FileTypeClassifier fileTypeClassifier, IssuesCache issuesCache, IssuesCache securityHotspotsCache, TaintVulnerabilitiesCache taintVulnerabilitiesCache,
     SonarLintTelemetry telemetry, SkippedPluginsNotifier skippedPluginsNotifier, StandaloneEngineManager standaloneEngineManager, DiagnosticPublisher diagnosticPublisher,
     SonarLintExtendedLanguageClient lsClient, OpenNotebooksCache openNotebooksCache, NotebookDiagnosticPublisher notebookDiagnosticPublisher, ProgressManager progressManager) {
     this.filesIgnoredByScmCache = filesIgnoredByScmCache;
-    this.lsLogOutput = lsLogOutput;
+    this.clientLogger = clientLogger;
+    this.logOutput = logOutput;
     this.workspaceFoldersManager = workspaceFoldersManager;
     this.bindingManager = bindingManager;
     this.javaConfigCache = javaConfigCache;
@@ -130,9 +132,9 @@ public class AnalysisTaskExecutor {
       task.checkCanceled();
       analyze(task);
     } catch (CanceledException e) {
-      lsLogOutput.debug("Analysis canceled");
+      clientLogger.debug("Analysis canceled");
     } catch (Exception e) {
-      lsLogOutput.error("Analysis failed", e);
+      clientLogger.error("Analysis failed", e);
     }
   }
 
@@ -233,9 +235,9 @@ public class AnalysisTaskExecutor {
     Map<URI, VersionedOpenFile> nonCNOrCppFiles = ofNullable(splitCppAndNonCppFiles.get(false)).orElse(Map.of());
     if (!cOrCppFiles.isEmpty() && (settings.getPathToCompileCommands() == null || !Files.isRegularFile(Paths.get(settings.getPathToCompileCommands())))) {
       if (settings.getPathToCompileCommands() == null) {
-        lsLogOutput.debug("Skipping analysis of C and C++ file(s) because no compilation database was configured");
+        clientLogger.debug("Skipping analysis of C and C++ file(s) because no compilation database was configured");
       } else {
-        lsLogOutput.debug("Skipping analysis of C and C++ file(s) because configured compilation database does not exist: " + settings.getPathToCompileCommands());
+        clientLogger.debug("Skipping analysis of C and C++ file(s) because configured compilation database does not exist: " + settings.getPathToCompileCommands());
       }
       cOrCppFiles.keySet().forEach(this::clearIssueCacheAndPublishEmptyDiagnostics);
       lsClient.needCompilationDatabase();
@@ -249,7 +251,7 @@ public class AnalysisTaskExecutor {
     javaFiles.forEach((uri, openFile) -> {
       var javaConfigOpt = javaConfigCache.getOrFetch(uri);
       if (javaConfigOpt.isEmpty()) {
-        lsLogOutput.debug(format("Analysis of Java file '%s' may not show all issues because SonarLint" +
+        clientLogger.debug(format("Analysis of Java file \"%s\" may not show all issues because SonarLint" +
           " was unable to query project configuration (classpath, source level, ...)", uri));
         clearIssueCacheAndPublishEmptyDiagnostics(uri);
       } else {
@@ -275,10 +277,10 @@ public class AnalysisTaskExecutor {
       var connectedEngine = binding.get().getEngine();
       var excludedByServerConfiguration = connectedEngine.getExcludedFiles(binding.get().getBinding(),
         filesToAnalyze.keySet(),
-        uri -> FileUtils.getFileRelativePath(Paths.get(baseDirUri), uri),
+        uri -> FileUtils.getFileRelativePath(Paths.get(baseDirUri), uri, logOutput),
         uri -> fileTypeClassifier.isTest(settings, uri, filesToAnalyze.get(uri).isJava(), () -> javaConfigCache.getOrFetch(uri)));
       excludedByServerConfiguration.forEach(f -> {
-        lsLogOutput.debug(format("Skip analysis of file '%s' excluded by server configuration", f));
+        clientLogger.debug(format("Skip analysis of file \"%s\" excluded by server configuration", f));
         nonExcludedFiles.remove(f);
         clearIssueCacheAndPublishEmptyDiagnostics(f);
       });
@@ -286,7 +288,8 @@ public class AnalysisTaskExecutor {
 
     if (!nonExcludedFiles.isEmpty()) {
       if (task.shouldShowProgress()) {
-        progressManager.doWithProgress(String.format("SonarLint scanning %d files for hotspots", task.getFilesToAnalyze().size()), null, () -> {},
+        progressManager.doWithProgress(String.format("SonarLint scanning %d files for hotspots", task.getFilesToAnalyze().size()), null, () -> {
+          },
           progressFacade -> analyzeSingleModuleNonExcluded(task, settings, binding, nonExcludedFiles, baseDirUri, javaConfigs, progressFacade));
       } else {
         analyzeSingleModuleNonExcluded(task, settings, binding, nonExcludedFiles, baseDirUri, javaConfigs, null);
@@ -311,9 +314,9 @@ public class AnalysisTaskExecutor {
     Map<URI, VersionedOpenFile> filesToAnalyze, URI baseDirUri, Map<URI, GetJavaConfigResponse> javaConfigs, @Nullable ProgressFacade progressFacade) {
     checkCanceled(task, progressFacade);
     if (filesToAnalyze.size() == 1) {
-      lsLogOutput.info(format("Analyzing file '%s'...", filesToAnalyze.keySet().iterator().next()));
+      clientLogger.info(format("Analyzing file \"%s\"...", filesToAnalyze.keySet().iterator().next()));
     } else {
-      lsLogOutput.info(format("Analyzing %d files...", filesToAnalyze.size()));
+      clientLogger.info(format("Analyzing %d files...", filesToAnalyze.size()));
     }
 
     filesToAnalyze.forEach((fileUri, openFile) -> {
@@ -367,15 +370,15 @@ public class AnalysisTaskExecutor {
         totalIssueCount.addAndGet(foundIssues);
         totalHotspotCount.addAndGet(securityHotspotsCache.count(f));
         diagnosticPublisher.publishDiagnostics(f, task.shouldKeepHotspotsOnly());
-        notebookDiagnosticPublisher.cleanupDiagnostics(f);
+        notebookDiagnosticPublisher.cleanupDiagnosticsForCellsWithoutIssues(f);
       });
       telemetry.addReportedRules(ruleKeys);
       if (!task.shouldKeepHotspotsOnly()) {
-        lsLogOutput.info(format("Found %s %s", totalIssueCount.get(), pluralize(totalIssueCount.get(), "issue")));
+        clientLogger.info(format("Found %s %s", totalIssueCount.get(), pluralize(totalIssueCount.get(), "issue")));
       }
       var hotspotsCount = totalHotspotCount.get();
       if (hotspotsCount != 0) {
-        lsLogOutput.info(format("Found %s %s", hotspotsCount, pluralize(hotspotsCount, "security hotspot")));
+        clientLogger.info(format("Found %s %s", hotspotsCount, pluralize(hotspotsCount, "security hotspot")));
       }
     }
   }
@@ -460,10 +463,10 @@ public class AnalysisTaskExecutor {
       .addRuleParameters(settingsManager.getCurrentSettings().getRuleParameters())
       .build();
 
-    lsLogOutput.debug(format("Analysis triggered with configuration:%n%s", configuration.toString()));
+    clientLogger.debug(format("Analysis triggered with configuration:%n%s", configuration.toString()));
 
     var engine = standaloneEngineManager.getOrCreateStandaloneEngine();
-    return analyzeWithTiming(() -> engine.analyze(configuration, issueListener, new LanguageClientLogOutput(lsLogOutput, true), new TaskProgressMonitor(task)),
+    return analyzeWithTiming(() -> engine.analyze(configuration, issueListener, new LanguageClientLogOutput(clientLogger, true), new TaskProgressMonitor(task)),
       engine.getPluginDetails(),
       () -> {
       });
@@ -479,9 +482,9 @@ public class AnalysisTaskExecutor {
       .build();
 
     if (settingsManager.getCurrentSettings().hasLocalRuleConfiguration()) {
-      lsLogOutput.debug("Local rules settings are ignored, using quality profile from server");
+      clientLogger.debug("Local rules settings are ignored, using quality profile from server");
     }
-    lsLogOutput.debug(format("Analysis triggered with configuration:%n%s", configuration.toString()));
+    clientLogger.debug(format("Analysis triggered with configuration:%n%s", configuration.toString()));
 
     var engine = binding.getEngine();
     var serverIssueTracker = binding.getServerIssueTracker();
@@ -494,11 +497,11 @@ public class AnalysisTaskExecutor {
       }
     };
     var progressMonitor = progressFacade == null ? new TaskProgressMonitor(task) : progressFacade.asCoreMonitor();
-    return analyzeWithTiming(() -> engine.analyze(configuration, accumulatorIssueListener, new LanguageClientLogOutput(lsLogOutput, true), progressMonitor),
+    return analyzeWithTiming(() -> engine.analyze(configuration, accumulatorIssueListener, new LanguageClientLogOutput(clientLogger, true), progressMonitor),
       engine.getPluginDetails(),
       () -> filesToAnalyze.forEach((fileUri, openFile) -> {
         var issues = issuesPerFiles.getOrDefault(fileUri, List.of());
-        var filePath = FileUtils.toSonarQubePath(FileUtils.getFileRelativePath(baseDir, fileUri));
+        var filePath = FileUtils.toSonarQubePath(binding.toServerRelativePath(FileUtils.getFileRelativePath(baseDir, fileUri, logOutput)));
         serverIssueTracker.matchAndTrack(filePath, issues, issueListener, task.shouldFetchServerIssues());
       }));
   }
@@ -516,14 +519,14 @@ public class AnalysisTaskExecutor {
     }
     filesToAnalyze.forEach((uri, openFile) -> configurationBuilder
       .addInputFiles(
-        new AnalysisClientInputFile(uri, FileUtils.getFileRelativePath(baseDir, uri), openFile.getContent(),
+        new AnalysisClientInputFile(uri, FileUtils.getFileRelativePath(baseDir, uri, logOutput), openFile.getContent(),
           fileTypeClassifier.isTest(settings, uri, openFile.isJava(), () -> ofNullable(javaConfigs.get(uri))),
           openFile.getLanguageId())));
     return configurationBuilder;
   }
 
   /**
-   * @param analyze Analysis callback
+   * @param analyze          Analysis callback
    * @param postAnalysisTask Code that will be run after the analysis, but still counted in the total analysis duration.
    */
   private static AnalysisResultsWrapper analyzeWithTiming(Supplier<AnalysisResults> analyze, Collection<PluginDetails> allPlugins, Runnable postAnalysisTask) {

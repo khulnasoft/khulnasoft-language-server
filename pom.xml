@@ -4,12 +4,12 @@
   <parent>
     <groupId>org.sonarsource.parent</groupId>
     <artifactId>parent</artifactId>
-    <version>68.0.0.247</version>
+    <version>71.0.0.1292</version>
     <relativePath/>
   </parent>
   <groupId>org.sonarsource.sonarlint.ls</groupId>
   <artifactId>sonarlint-language-server</artifactId>
-  <version>2.20-SNAPSHOT</version>
+  <version>3.3-SNAPSHOT</version>
   <packaging>jar</packaging>
   <name>SonarLint Language Server</name>
   <description>SonarLint Language Server</description>
@@ -23,12 +23,12 @@
   </issueManagement>
 
   <properties>
-    <jdk.min.version>11</jdk.min.version>
-    <sonarlint.core.version>8.19.0.72745</sonarlint.core.version>
+    <jdk.min.version>17</jdk.min.version>
+    <sonarlint.core.version>9.6.0.76599</sonarlint.core.version>
     <!-- Version used by Xodus -->
     <kotlin.version>1.6.10</kotlin.version>
     <!-- analyzers used for tests -->
-    <sonar.java.version>7.18.0.31443</sonar.java.version>
+    <sonar.java.version>7.24.0.32100</sonar.java.version>
     <sonar.javascript.version>10.1.0.21143</sonar.javascript.version>
     <sonar.php.version>3.28.0.9490</sonar.php.version>
     <sonar.python.version>4.2.0.11487</sonar.python.version>
@@ -36,7 +36,8 @@
     <sonar.xml.version>2.7.0.3820</sonar.xml.version>
     <sonar.text.version>2.0.1.611</sonar.text.version>
     <sonar.go.version>1.12.0.4259</sonar.go.version>
-    <sonar.iac.version>1.16.0.3845</sonar.iac.version>
+    <sonar.iac.version>1.22.0.7057</sonar.iac.version>
+    <sonarlint.omnisharp.version>1.13.0.76953</sonarlint.omnisharp.version>
     <gitRepositoryName>sonarlint-language-server</gitRepositoryName>
     <!-- Release: enable publication to Bintray -->
     <artifactsToPublish>${project.groupId}:${project.artifactId}:jar</artifactsToPublish>
@@ -52,7 +53,7 @@
     <dependency>
       <groupId>org.eclipse.lsp4j</groupId>
       <artifactId>org.eclipse.lsp4j</artifactId>
-      <version>0.20.0</version>
+      <version>0.21.1</version>
     </dependency>
     <dependency>
       <groupId>org.sonarsource.sonarlint.core</groupId>
@@ -67,7 +68,7 @@
     <dependency>
       <groupId>org.apache.commons</groupId>
       <artifactId>commons-lang3</artifactId>
-      <version>3.12.0</version>
+      <version>3.14.0</version>
     </dependency>
     <dependency>
       <groupId>org.apache.commons</groupId>
@@ -82,24 +83,14 @@
       <scope>provided</scope>
     </dependency>
     <dependency>
-      <groupId>org.apache.httpcomponents.core5</groupId>
-      <artifactId>httpcore5</artifactId>
-      <version>5.2.1</version>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.httpcomponents.client5</groupId>
-      <artifactId>httpclient5</artifactId>
-      <version>5.2.1</version>
-    </dependency>
-    <dependency>
       <groupId>commons-codec</groupId>
       <artifactId>commons-codec</artifactId>
-      <version>1.15</version>
+      <version>1.16.0</version>
     </dependency>
     <dependency>
       <groupId>org.eclipse.jgit</groupId>
       <artifactId>org.eclipse.jgit</artifactId>
-      <version>6.5.0.202303070854-r</version>
+      <version>6.8.0.202311291450-r</version>
     </dependency>
     <dependency>
       <groupId>org.slf4j</groupId>
@@ -142,7 +133,13 @@
     <dependency>
       <groupId>org.mockito</groupId>
       <artifactId>mockito-core</artifactId>
-      <version>4.4.0</version>
+      <version>5.2.0</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.mockito</groupId>
+      <artifactId>mockito-junit-jupiter</artifactId>
+      <version>5.2.0</version>
       <scope>test</scope>
     </dependency>
     <dependency>
@@ -267,6 +264,15 @@
                   <outputDirectory>${project.build.directory}/plugins</outputDirectory>
                   <destFileName>sonariac.jar</destFileName>
                 </artifactItem>
+                <artifactItem>
+                  <groupId>org.sonarsource.sonarlint.omnisharp</groupId>
+                  <artifactId>sonarlint-omnisharp-plugin</artifactId>
+                  <version>${sonarlint.omnisharp.version}</version>
+                  <type>jar</type>
+                  <overWrite>false</overWrite>
+                  <outputDirectory>${project.build.directory}/plugins</outputDirectory>
+                  <destFileName>sonarlintomnisharp.jar</destFileName>
+                </artifactItem>
               </artifactItems>
             </configuration>
           </execution>
@@ -355,7 +361,7 @@
           <plugin>
             <groupId>org.jacoco</groupId>
             <artifactId>jacoco-maven-plugin</artifactId>
-            <version>0.8.4</version>
+            <version>0.8.10</version>
             <executions>
               <execution>
                 <id>prepare-agent</id>

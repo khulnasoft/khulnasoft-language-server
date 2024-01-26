@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -26,16 +26,15 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.sonarsource.sonarlint.core.client.api.standalone.StandaloneSonarLintEngine;
 import org.sonarsource.sonarlint.core.clientapi.backend.rules.ListAllStandaloneRulesDefinitionsResponse;
 import org.sonarsource.sonarlint.core.clientapi.backend.rules.RuleDefinitionDto;
 import org.sonarsource.sonarlint.core.commons.RuleKey;
 import org.sonarsource.sonarlint.ls.NodeJsRuntime;
+import org.sonarsource.sonarlint.ls.backend.BackendService;
 import org.sonarsource.sonarlint.ls.backend.BackendServiceFacade;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingManager;
 import org.sonarsource.sonarlint.ls.settings.SettingsManager;
 import org.sonarsource.sonarlint.ls.settings.WorkspaceSettings;
-import org.sonarsource.sonarlint.ls.standalone.StandaloneEngineManager;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.assertj.core.api.AssertionsForInterfaceTypes.assertThat;
@@ -46,25 +45,24 @@ class TelemetryClientAttributesProviderImplTests {
 
   private TelemetryClientAttributesProviderImpl underTest;
   private WorkspaceSettings workspaceSettings;
-  private StandaloneSonarLintEngine standaloneSonarLintEngine;
   private Map<String, Object> additionalAttributes;
   private BackendServiceFacade backendServiceFacade;
+  private BackendService backendService;
 
   @BeforeEach
   void init() {
     backendServiceFacade = mock(BackendServiceFacade.class);
+    backendService = mock(BackendService.class);
+    when(backendServiceFacade.getBackendService()).thenReturn(backendService);
     var nodeJsRuntime = mock(NodeJsRuntime.class);
     when(nodeJsRuntime.nodeVersion()).thenReturn("nodeVersion");
     var settingsManager = mock(SettingsManager.class);
     workspaceSettings = mock(WorkspaceSettings.class);
-    var standaloneEngineManager = mock(StandaloneEngineManager.class);
-    standaloneSonarLintEngine = mock(StandaloneSonarLintEngine.class);
-    when(standaloneEngineManager.getOrCreateStandaloneEngine()).thenReturn(standaloneSonarLintEngine);
     when(settingsManager.getCurrentSettings()).thenReturn(workspaceSettings);
     when(workspaceSettings.getExcludedRules()).thenReturn(Collections.emptyList());
     when(workspaceSettings.getIncludedRules()).thenReturn(Collections.emptyList());
     additionalAttributes = new HashMap<>();
-    underTest = new TelemetryClientAttributesProviderImpl(settingsManager, mock(ProjectBindingManager.class), nodeJsRuntime, standaloneEngineManager, additionalAttributes, backendServiceFacade);
+    underTest = new TelemetryClientAttributesProviderImpl(settingsManager, mock(ProjectBindingManager.class), nodeJsRuntime, additionalAttributes, backendServiceFacade);
   }
 
   @Test
@@ -104,7 +102,7 @@ class TelemetryClientAttributesProviderImplTests {
     when(ruleKey1.toString()).thenReturn("ruleKey1");
     when(ruleKey2.toString()).thenReturn("ruleKey2");
     when(workspaceSettings.getIncludedRules()).thenReturn(List.of(ruleKey1, ruleKey2));
-    when(backendServiceFacade.listAllStandaloneRulesDefinitions())
+    when(backendService.listAllStandaloneRulesDefinitions())
       .thenReturn(CompletableFuture.completedFuture(new ListAllStandaloneRulesDefinitionsResponse(Map.of())));
 
     assertThat(underTest.getNonDefaultEnabledRules()).containsExactly("ruleKey2", "ruleKey1");
@@ -120,7 +118,7 @@ class TelemetryClientAttributesProviderImplTests {
     when(standaloneRule1.getKey()).thenReturn("ruleKey2");
     when(standaloneRule1.isActiveByDefault()).thenReturn(true);
     when(workspaceSettings.getIncludedRules()).thenReturn(List.of(ruleKey1, ruleKey2));
-    when(backendServiceFacade.listAllStandaloneRulesDefinitions())
+    when(backendService.listAllStandaloneRulesDefinitions())
       .thenReturn(CompletableFuture.completedFuture(new ListAllStandaloneRulesDefinitionsResponse(Map.of("ruleKey1", standaloneRule1))));
 
     assertThat(underTest.getNonDefaultEnabledRules()).containsExactly("ruleKey1");
@@ -133,7 +131,7 @@ class TelemetryClientAttributesProviderImplTests {
     when(ruleKey1.toString()).thenReturn("ruleKey1");
     when(ruleKey2.toString()).thenReturn("ruleKey2");
     when(workspaceSettings.getExcludedRules()).thenReturn(List.of(ruleKey1, ruleKey2));
-    when(backendServiceFacade.listAllStandaloneRulesDefinitions())
+    when(backendService.listAllStandaloneRulesDefinitions())
       .thenReturn(CompletableFuture.completedFuture(new ListAllStandaloneRulesDefinitionsResponse(Map.of())));
 
     assertThat(underTest.getDefaultDisabledRules()).isEmpty();
@@ -149,7 +147,7 @@ class TelemetryClientAttributesProviderImplTests {
     when(standaloneRule1.getKey()).thenReturn("ruleKey1");
     when(standaloneRule1.isActiveByDefault()).thenReturn(true);
     when(workspaceSettings.getExcludedRules()).thenReturn(List.of(ruleKey1, ruleKey2));
-    when(backendServiceFacade.listAllStandaloneRulesDefinitions())
+    when(backendService.listAllStandaloneRulesDefinitions())
       .thenReturn(CompletableFuture.completedFuture(new ListAllStandaloneRulesDefinitionsResponse(Map.of("ruleKey1", standaloneRule1))));
 
     assertThat(underTest.getDefaultDisabledRules()).containsExactly("ruleKey1");

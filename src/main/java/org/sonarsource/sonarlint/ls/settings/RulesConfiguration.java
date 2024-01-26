@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -89,7 +89,7 @@ class RulesConfiguration {
     @CheckForNull
     private static String safeParseLevel(Map<String, Object> config) {
       Object levelValue = config.get("level");
-      return levelValue instanceof String ? (String) levelValue : null;
+      return levelValue instanceof String actualValue ? actualValue : null;
     }
 
     @SuppressWarnings("unchecked")

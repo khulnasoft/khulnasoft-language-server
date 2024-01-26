@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -19,7 +19,7 @@
  */
 package org.sonarsource.sonarlint.ls.connected.events;
 
-import org.sonarsource.sonarlint.core.serverapi.push.ServerEvent;
+import org.sonarsource.sonarlint.core.commons.push.ServerEvent;
 
 public interface ServerSentEventsHandlerService {
   void handleEvents(ServerEvent event);

@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -38,6 +38,7 @@ import org.sonarsource.sonarlint.ls.connected.DelegatingIssue;
 import org.sonarsource.sonarlint.ls.file.VersionedOpenFile;
 
 import static org.sonarsource.sonarlint.ls.util.Utils.hotspotReviewStatusValueOfHotspotStatus;
+import static org.sonarsource.sonarlint.ls.util.Utils.isDelegatingIssueWithServerIssueKey;
 
 public class IssuesCache {
 
@@ -69,8 +70,21 @@ public class IssuesCache {
   }
 
   public void reportIssue(VersionedOpenFile versionedOpenFile, Issue issue) {
-    inProgressAnalysisIssuesPerIdPerFileURI.computeIfAbsent(versionedOpenFile.getUri(), u -> new HashMap<>()).put(UUID.randomUUID().toString(),
+    var issueId = getIssueId(issue);
+    inProgressAnalysisIssuesPerIdPerFileURI.computeIfAbsent(versionedOpenFile.getUri(), u -> new HashMap<>()).put(issueId,
       new VersionedIssue(issue, versionedOpenFile.getVersion()));
+  }
+
+  private static String getIssueId(Issue issue) {
+    String issueId = null;
+    if (issue instanceof DelegatingIssue delegatingIssue) {
+      var issueUuid = delegatingIssue.getIssueId();
+      issueId = issueUuid != null ? issueUuid.toString() : null;
+    }
+    if (issueId == null) {
+      issueId = UUID.randomUUID().toString();
+    }
+    return issueId;
   }
 
   public int count(URI f) {
@@ -98,11 +112,16 @@ public class IssuesCache {
     if (issues != null) {
       var first = issues.entrySet()
         .stream()
-        .filter(issueEntry -> isDelegatingIssueWithServerIssueKey(key, issueEntry))
+        .filter(issueEntry -> isDelegatingIssueWithServerIssueKey(key, issueEntry) || isLocalIssueWithKey(key, issueEntry.getValue()))
         .map(Map.Entry::getKey)
         .findFirst();
       first.ifPresent(issues::remove);
     }
+  }
+
+  private static boolean isLocalIssueWithKey(String key, VersionedIssue versionedIssue) {
+    return versionedIssue.issue() instanceof DelegatingIssue delegatingIssue
+      && (key.equals(delegatingIssue.getIssueId().toString()));
   }
 
   public Optional<Map.Entry<String, VersionedIssue>> findIssuePerId(String fileUriStr, String serverIssueKey) {
@@ -121,7 +140,7 @@ public class IssuesCache {
     var issuePerId = findIssuePerId(fileUriStr, serverIssueKey);
     if (issuePerId.isPresent()) {
       var versionedIssue = issuePerId.get().getValue();
-      var delegatingIssue = (DelegatingIssue) versionedIssue.getIssue();
+      var delegatingIssue = (DelegatingIssue) versionedIssue.issue();
       var clonedDelegatingIssue = delegatingIssue.cloneWithNewStatus(hotspotReviewStatusValueOfHotspotStatus(newStatus));
       var clonedVersionedIssue = new VersionedIssue(clonedDelegatingIssue, versionedIssue.documentVersion);
       var issuesByKey = issuesPerIdPerFileURI.get(URI.create(fileUriStr));
@@ -129,11 +148,6 @@ public class IssuesCache {
         issuesByKey.put(issuePerId.get().getKey(), clonedVersionedIssue);
       }
     }
-  }
-
-  private static boolean isDelegatingIssueWithServerIssueKey(String serverIssueKey, Map.Entry<String, VersionedIssue> issueEntry) {
-    return issueEntry.getValue().getIssue() instanceof DelegatingIssue
-      && (serverIssueKey.equals(((DelegatingIssue) issueEntry.getValue().getIssue()).getServerIssueKey()));
   }
 
   public Optional<VersionedIssue> getIssueForDiagnostic(URI fileUri, Diagnostic d) {
@@ -145,23 +159,7 @@ public class IssuesCache {
       .filter(Objects::nonNull);
   }
 
-  public static class VersionedIssue {
-    private final Issue issue;
-    private final int documentVersion;
-
-    public VersionedIssue(Issue issue, int documentVersion) {
-      this.issue = issue;
-      this.documentVersion = documentVersion;
-    }
-
-    public Issue getIssue() {
-      return issue;
-    }
-
-    public int getDocumentVersion() {
-      return documentVersion;
-    }
-  }
+  public record VersionedIssue(Issue issue, int documentVersion) {}
 
   public Map<String, VersionedIssue> get(URI fileUri) {
     return inProgressAnalysisIssuesPerIdPerFileURI.getOrDefault(fileUri, issuesPerIdPerFileURI.getOrDefault(fileUri, Map.of()));

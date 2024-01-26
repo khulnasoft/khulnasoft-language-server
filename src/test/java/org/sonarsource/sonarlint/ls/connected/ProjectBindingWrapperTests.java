@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -39,6 +39,16 @@ class ProjectBindingWrapperTests {
     assertThat(underTest.getBinding()).isEqualTo(binding);
     assertThat(underTest.getEngine()).isEqualTo(engine);
     assertThat(underTest.getServerIssueTracker()).isEqualTo(issueTrackerWrapper);
+    assertThat(underTest.toServerRelativePath("idePrefix/some/file")).isEqualTo("prefix/some/file");
   }
 
+  @Test
+  void test_fix_path_prefix() {
+    var binding = new ProjectBinding("projectKey", "", "some/folder");
+    var engine = mock(ConnectedSonarLintEngine.class);
+    var issueTrackerWrapper = mock(ServerIssueTrackerWrapper.class);
+    var underTest = new ProjectBindingWrapper("serverId", binding, engine, issueTrackerWrapper);
+
+    assertThat(underTest.toServerRelativePath("some/folder/some/file")).isEqualTo("some/file");
+  }
 }

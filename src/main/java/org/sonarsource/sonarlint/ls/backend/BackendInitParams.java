@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -41,6 +41,8 @@ public class BackendInitParams {
   private List<SonarCloudConnectionConfigurationDto> sonarCloudConnections;
   private String sonarlintUserHome;
   private Map<String, StandaloneRuleConfigDto> standaloneRuleConfigByKey;
+  private String userAgent;
+  private boolean isFocusOnNewCode;
 
   public String getTelemetryProductKey() {
     return telemetryProductKey;
@@ -128,5 +130,21 @@ public class BackendInitParams {
 
   public Map<String, StandaloneRuleConfigDto> getStandaloneRuleConfigByKey() {
     return this.standaloneRuleConfigByKey;
+  }
+
+  public boolean isFocusOnNewCode() {
+    return isFocusOnNewCode;
+  }
+
+  public void setFocusOnNewCode(boolean focusOnNewCode) {
+    isFocusOnNewCode = focusOnNewCode;
+  }
+
+  public String getUserAgent() {
+    return userAgent;
+  }
+
+  public void setUserAgent(String userAgent) {
+    this.userAgent = userAgent;
   }
 }

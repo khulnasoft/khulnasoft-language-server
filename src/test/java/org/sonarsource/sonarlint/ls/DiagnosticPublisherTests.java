@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -29,8 +29,10 @@ import org.junit.jupiter.api.Test;
 import org.sonarsource.sonarlint.core.client.api.common.analysis.Issue;
 import org.sonarsource.sonarlint.core.commons.IssueSeverity;
 import org.sonarsource.sonarlint.ls.IssuesCache.VersionedIssue;
+import org.sonarsource.sonarlint.ls.connected.DelegatingIssue;
 import org.sonarsource.sonarlint.ls.connected.TaintVulnerabilitiesCache;
 import org.sonarsource.sonarlint.ls.file.VersionedOpenFile;
+import org.sonarsource.sonarlint.ls.notebooks.DelegatingCellIssue;
 import org.sonarsource.sonarlint.ls.notebooks.OpenNotebooksCache;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -41,7 +43,6 @@ import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.sonarsource.sonarlint.ls.DiagnosticPublisher.convert;
 
 class DiagnosticPublisherTests {
 
@@ -65,7 +66,7 @@ class DiagnosticPublisherTests {
     when(issue.getMessage()).thenReturn("Do this, don't do that");
     when(issue.getStartLine()).thenReturn(null);
     var versionedIssue = new VersionedIssue(issue, 1);
-    Diagnostic diagnostic = convert(entry("id", versionedIssue));
+    Diagnostic diagnostic = underTest.convert(entry("id", versionedIssue));
     assertThat(diagnostic.getRange()).isEqualTo(new Range(new Position(0, 0), new Position(0, 0)));
   }
 
@@ -77,20 +78,20 @@ class DiagnosticPublisherTests {
     when(issue.getSeverity()).thenReturn(IssueSeverity.BLOCKER);
     when(issue.getMessage()).thenReturn("Do this, don't do that");
     var versionedIssue = new VersionedIssue(issue, 1);
-    assertThat(convert(entry(id, versionedIssue)).getSeverity()).isEqualTo(DiagnosticSeverity.Warning);
+    assertThat(underTest.convert(entry(id, versionedIssue)).getSeverity()).isEqualTo(DiagnosticSeverity.Warning);
     when(issue.getSeverity()).thenReturn(IssueSeverity.CRITICAL);
-    assertThat(convert(entry(id, versionedIssue)).getSeverity()).isEqualTo(DiagnosticSeverity.Warning);
+    assertThat(underTest.convert(entry(id, versionedIssue)).getSeverity()).isEqualTo(DiagnosticSeverity.Warning);
     when(issue.getSeverity()).thenReturn(IssueSeverity.MAJOR);
-    assertThat(convert(entry(id, versionedIssue)).getSeverity()).isEqualTo(DiagnosticSeverity.Warning);
+    assertThat(underTest.convert(entry(id, versionedIssue)).getSeverity()).isEqualTo(DiagnosticSeverity.Warning);
     when(issue.getSeverity()).thenReturn(IssueSeverity.MINOR);
-    assertThat(convert(entry(id, versionedIssue)).getSeverity()).isEqualTo(DiagnosticSeverity.Information);
+    assertThat(underTest.convert(entry(id, versionedIssue)).getSeverity()).isEqualTo(DiagnosticSeverity.Warning);
     when(issue.getSeverity()).thenReturn(IssueSeverity.INFO);
-    assertThat(convert(entry(id, versionedIssue)).getSeverity()).isEqualTo(DiagnosticSeverity.Hint);
+    assertThat(underTest.convert(entry(id, versionedIssue)).getSeverity()).isEqualTo(DiagnosticSeverity.Warning);
   }
 
   @Test
   void showFirstSecretDetectedNotificationOnlyOnce() {
-    underTest.initialize(false, false);
+    underTest.initialize(false);
 
     var uri = initWithOneSecretIssue();
 
@@ -107,7 +108,7 @@ class DiagnosticPublisherTests {
 
   @Test
   void dontShowFirstSecretDetectedNotificationIfAlreadyShown() {
-    underTest.initialize(true, false);
+    underTest.initialize(true);
 
     var uri = initWithOneSecretIssue();
 
@@ -117,33 +118,26 @@ class DiagnosticPublisherTests {
   }
 
   @Test
-  void showFirstCobolIssueDetectedNotificationOnlyOnce() {
-    underTest.initialize(false, false);
+  void setSeverityTest() {
+    var diagnostic = new Diagnostic();
+    diagnostic.setSeverity(DiagnosticSeverity.Error);
+    var delegatingIssue = mock(DelegatingIssue.class);
+    when(delegatingIssue.isOnNewCode()).thenReturn(false);
+    var delegatingCellIssue = mock(DelegatingCellIssue.class);
 
-    var uri = initWithOneCobolIssue();
+    DiagnosticPublisher.setSeverity(diagnostic, delegatingIssue, false);
+    assertThat(diagnostic.getSeverity()).isEqualTo(DiagnosticSeverity.Warning);
+    DiagnosticPublisher.setSeverity(diagnostic, delegatingIssue, true);
+    assertThat(diagnostic.getSeverity()).isEqualTo(DiagnosticSeverity.Hint);
+    DiagnosticPublisher.setSeverity(diagnostic, delegatingCellIssue, false);
+    assertThat(diagnostic.getSeverity()).isEqualTo(DiagnosticSeverity.Warning);
+    DiagnosticPublisher.setSeverity(diagnostic, delegatingCellIssue, true);
+    assertThat(diagnostic.getSeverity()).isEqualTo(DiagnosticSeverity.Warning);
 
-    underTest.publishDiagnostics(uri, false);
-
-    verify(languageClient, times(1)).showFirstCobolIssueDetectedNotification();
-
-    reset(languageClient);
-
-    underTest.publishDiagnostics(uri, false);
-
-    verify(languageClient, never()).showFirstCobolIssueDetectedNotification();
+    when(delegatingIssue.isOnNewCode()).thenReturn(true);
+    DiagnosticPublisher.setSeverity(diagnostic, delegatingCellIssue, true);
+    assertThat(diagnostic.getSeverity()).isEqualTo(DiagnosticSeverity.Warning);
   }
-
-  @Test
-  void dontShowFirstCobolIssueDetectedNotificationIfAlreadyShown() {
-    underTest.initialize(true, true);
-
-    var uri = initWithOneCobolIssue();
-
-    underTest.publishDiagnostics(uri, false);
-
-    verify(languageClient, never()).showFirstCobolIssueDetectedNotification();
-  }
-
 
   private URI initWithOneSecretIssue() {
     var issue = mock(Issue.class);

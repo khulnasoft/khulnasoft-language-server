@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -39,7 +39,6 @@ import org.sonarsource.sonarlint.core.client.api.common.analysis.Issue;
 import org.sonarsource.sonarlint.core.commons.HotspotReviewStatus;
 import org.sonarsource.sonarlint.core.commons.Language;
 import org.sonarsource.sonarlint.core.commons.RuleType;
-import org.sonarsource.sonarlint.core.commons.VulnerabilityProbability;
 import org.sonarsource.sonarlint.ls.IssuesCache.VersionedIssue;
 import org.sonarsource.sonarlint.ls.connected.DelegatingIssue;
 import org.sonarsource.sonarlint.ls.connected.TaintVulnerabilitiesCache;
@@ -47,10 +46,7 @@ import org.sonarsource.sonarlint.ls.notebooks.OpenNotebooksCache;
 import org.sonarsource.sonarlint.ls.util.Utils;
 import org.sonarsource.sonarlint.ls.watcher.IssueParams;
 
-import static java.util.stream.Collectors.toList;
 import static org.sonarsource.sonarlint.ls.util.Utils.buildMessageWithPluralizedSuffix;
-import static org.sonarsource.sonarlint.ls.util.Utils.hotspotSeverity;
-import static org.sonarsource.sonarlint.ls.util.Utils.severity;
 
 public class DiagnosticPublisher {
 
@@ -63,7 +59,6 @@ public class DiagnosticPublisher {
 
   private final SonarLintExtendedLanguageClient client;
   private boolean firstSecretIssueDetected;
-  private boolean firstCobolIssueDetected;
 
   private final IssuesCache issuesCache;
   private final IssuesCache hotspotsCache;
@@ -78,11 +73,11 @@ public class DiagnosticPublisher {
     this.issuesCache = issuesCache;
     this.hotspotsCache = hotspotsCache;
     this.openNotebooksCache = openNotebooksCache;
+    this.focusOnNewCode = false;
   }
 
-  public void initialize(boolean firstSecretDetected, boolean firstCobolIssueDetected) {
+  public void initialize(boolean firstSecretDetected) {
     this.firstSecretIssueDetected = firstSecretDetected;
-    this.firstCobolIssueDetected = firstCobolIssueDetected;
   }
 
   public void publishDiagnostics(URI f, boolean onlyHotspots) {
@@ -132,30 +127,45 @@ public class DiagnosticPublisher {
       issue.getType() == RuleType.SECURITY_HOTSPOT ?
         hotspotSeverity(issue.getVulnerabilityProbability().orElse(VulnerabilityProbability.MEDIUM)) : severity(issue.getSeverity());
 
-    return prepareDiagnostic(severity, issue, entry.getKey(), false);
+  public void setFocusOnNewCode(boolean focusOnNewCode) {
+    this.focusOnNewCode = focusOnNewCode;
   }
 
-  public static Diagnostic prepareDiagnostic(DiagnosticSeverity severity, Issue issue, String entryKey, boolean ignoreSecondaryLocations) {
+  public boolean isFocusOnNewCode() {
+    return focusOnNewCode;
+  }
+
+  public static Diagnostic prepareDiagnostic(Issue issue, String entryKey, boolean ignoreSecondaryLocations, boolean focusOnNewCode) {
     var diagnostic = new Diagnostic();
 
-    diagnostic.setSeverity(severity);
+    setSeverity(diagnostic, issue, focusOnNewCode);
     var range = Utils.convert(issue);
     diagnostic.setRange(range);
     diagnostic.setCode(issue.getRuleKey());
     diagnostic.setMessage(message(issue, ignoreSecondaryLocations));
-    setSource(issue, diagnostic);
-    diagnostic.setData(getData(issue, entryKey));
+    setSource(diagnostic, issue);
+    setData(diagnostic, issue, entryKey);
 
     return diagnostic;
   }
 
+  static void setSeverity(Diagnostic diagnostic, Issue issue, boolean focusOnNewCode) {
+    if (focusOnNewCode && issue instanceof DelegatingIssue delegatingIssue) {
+      var newCodeSeverity = delegatingIssue.isOnNewCode() ? DiagnosticSeverity.Warning : DiagnosticSeverity.Hint;
+      diagnostic.setSeverity(newCodeSeverity);
+    } else {
+      diagnostic.setSeverity(DiagnosticSeverity.Warning);
+    }
+  }
+
   public static class DiagnosticData {
+
     String entryKey;
+
     @Nullable
     String serverIssueKey;
     @Nullable
     HotspotReviewStatus status;
-
     public void setEntryKey(String entryKey) {
       this.entryKey = entryKey;
     }
@@ -171,28 +181,26 @@ public class DiagnosticPublisher {
     public String getEntryKey() {
       return entryKey;
     }
-  }
 
-  private static DiagnosticData getData(Issue issue, String entryKey) {
-    var data = new DiagnosticData();
-    if (issue instanceof DelegatingIssue && issue.getType() == RuleType.SECURITY_HOTSPOT) {
-      var delegatedIssue = (DelegatingIssue) issue;
-      data.setStatus(delegatedIssue.getReviewStatus());
-      data.setServerIssueKey(delegatedIssue.getServerIssueKey());
-    }
-    data.setEntryKey(entryKey);
-    return data;
   }
-
-  public static void setSource(Issue issue, Diagnostic diagnostic) {
-    if (issue instanceof DelegatingIssue) {
-      var delegatedIssue = (DelegatingIssue) issue;
+  public static void setSource(Diagnostic diagnostic, Issue issue) {
+    if (issue instanceof DelegatingIssue delegatedIssue) {
       var isKnown = delegatedIssue.getServerIssueKey() != null;
       var isHotspot = delegatedIssue.getType() == RuleType.SECURITY_HOTSPOT;
       diagnostic.setSource(isKnown && isHotspot ? REMOTE_SOURCE : SONARLINT_SOURCE);
     } else {
       diagnostic.setSource(SONARLINT_SOURCE);
     }
+  }
+
+  private static void setData(Diagnostic diagnostic, Issue issue, String entryKey) {
+    var data = new DiagnosticData();
+    if (issue instanceof DelegatingIssue delegatedIssue) {
+      data.setStatus(delegatedIssue.getReviewStatus());
+      data.setServerIssueKey(delegatedIssue.getServerIssueKey());
+    }
+    data.setEntryKey(entryKey);
+    diagnostic.setData(data);
   }
 
   public static String message(Issue issue, boolean ignoreSecondaryLocations) {
@@ -214,24 +222,19 @@ public class DiagnosticPublisher {
 
     Map<String, VersionedIssue> localIssues = issuesCache.get(newUri);
 
-    if (!firstSecretIssueDetected && localIssues.values().stream().anyMatch(v -> v.getIssue().getRuleKey().startsWith(Language.SECRETS.getLanguageKey()))) {
+    if (!firstSecretIssueDetected && localIssues.values().stream().anyMatch(v -> v.issue().getRuleKey().startsWith(Language.SECRETS.getLanguageKey()))) {
       client.showFirstSecretDetectionNotification();
       firstSecretIssueDetected = true;
     }
 
-    if (!firstCobolIssueDetected && localIssues.values().stream().anyMatch(v -> v.getIssue().getRuleKey().startsWith(Language.COBOL.getLanguageKey()))) {
-      client.showFirstCobolIssueDetectedNotification();
-      firstCobolIssueDetected = true;
-    }
-
     var localDiagnostics = localIssues.entrySet()
       .stream()
-      .map(DiagnosticPublisher::convert);
-    var taintDiagnostics = taintVulnerabilitiesCache.getAsDiagnostics(newUri);
+      .map(this::convert);
+    var taintDiagnostics = taintVulnerabilitiesCache.getAsDiagnostics(newUri, focusOnNewCode);
 
     var diagnosticList = Stream.concat(localDiagnostics, taintDiagnostics)
       .sorted(DiagnosticPublisher.byLineNumber())
-      .collect(toList());
+      .toList();
     p.setDiagnostics(diagnosticList);
     p.setUri(newUri.toString());
 
@@ -243,9 +246,9 @@ public class DiagnosticPublisher {
 
     p.setDiagnostics(hotspotsCache.get(newUri).entrySet()
       .stream()
-      .map(DiagnosticPublisher::convert)
+      .map(this::convert)
       .sorted(DiagnosticPublisher.byLineNumber())
-      .collect(toList()));
+      .toList());
     p.setUri(newUri.toString());
 
     return p;

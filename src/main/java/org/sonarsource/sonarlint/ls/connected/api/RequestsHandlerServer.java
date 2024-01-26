@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -25,7 +25,7 @@ import org.eclipse.lsp4j.MessageActionItem;
 import org.eclipse.lsp4j.MessageType;
 import org.eclipse.lsp4j.ShowMessageRequestParams;
 import org.sonarsource.sonarlint.core.clientapi.client.binding.AssistBindingParams;
-import org.sonarsource.sonarlint.core.clientapi.client.host.GetHostInfoResponse;
+import org.sonarsource.sonarlint.core.clientapi.client.info.GetClientInfoResponse;
 import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageClient;
 
 public class RequestsHandlerServer {
@@ -42,29 +42,19 @@ public class RequestsHandlerServer {
     this.workspaceName = workspaceName == null ? "(no open folder)" : workspaceName;
   }
 
-  public GetHostInfoResponse getHostInfo() {
-    return new GetHostInfoResponse(this.clientVersion + " - " + this.workspaceName);
+  public GetClientInfoResponse getHostInfo() {
+    return new GetClientInfoResponse(this.clientVersion + " - " + this.workspaceName);
   }
 
-  public void showHotspotHandleUnknownServer(String url) {
-    var params = new ShowMessageRequestParams();
-    params.setMessage("To display Security Hotspots, you need to configure a connection to SonarQube (" + url + ") in the settings");
-    params.setType(MessageType.Error);
-    var createConnectionAction = new MessageActionItem("Create Connection");
-    params.setActions(List.of(createConnectionAction));
-    client.showMessageRequest(params)
-      .thenAccept(action -> {
-        if (createConnectionAction.equals(action)) {
-          client.assistCreatingConnection(new SonarLintExtendedLanguageClient.CreateConnectionParams(false, url));
-        }
-      });
+  public void showIssueOrHotspotHandleUnknownServer(String url) {
+    client.assistCreatingConnection(new SonarLintExtendedLanguageClient.CreateConnectionParams(false, url));
   }
 
-  public void showHotspotHandleNoBinding(AssistBindingParams assistBindingParams) {
+  public void showHotspotOrIssueHandleNoBinding(AssistBindingParams assistBindingParams) {
     var connectionId = assistBindingParams.getConnectionId();
     var projectKey = assistBindingParams.getProjectKey();
     var messageRequestParams = new ShowMessageRequestParams();
-    messageRequestParams.setMessage("To display Security Hotspots, you need to configure a project binding to '"
+    messageRequestParams.setMessage("To display findings, you need to configure a project binding to '"
       + projectKey + "' on connection (" + connectionId + ")");
     messageRequestParams.setType(MessageType.Error);
     var configureBindingAction = new MessageActionItem("Configure Binding");

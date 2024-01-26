@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -20,14 +20,18 @@
 package org.sonarsource.sonarlint.ls.notebooks;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import javax.annotation.CheckForNull;
 import org.sonarsource.sonarlint.core.analysis.api.ClientInputFile;
 import org.sonarsource.sonarlint.core.analysis.api.Flow;
 import org.sonarsource.sonarlint.core.analysis.api.QuickFix;
 import org.sonarsource.sonarlint.core.client.api.common.analysis.Issue;
+import org.sonarsource.sonarlint.core.commons.CleanCodeAttribute;
+import org.sonarsource.sonarlint.core.commons.ImpactSeverity;
 import org.sonarsource.sonarlint.core.commons.IssueSeverity;
 import org.sonarsource.sonarlint.core.commons.RuleType;
+import org.sonarsource.sonarlint.core.commons.SoftwareQuality;
 import org.sonarsource.sonarlint.core.commons.TextRange;
 import org.sonarsource.sonarlint.core.commons.VulnerabilityProbability;
 
@@ -56,6 +60,16 @@ public class DelegatingCellIssue implements Issue {
   @Override
   public RuleType getType() {
     return type;
+  }
+
+  @Override
+  public Optional<CleanCodeAttribute> getCleanCodeAttribute() {
+    return issue.getCleanCodeAttribute();
+  }
+
+  @Override
+  public Map<SoftwareQuality, ImpactSeverity> getImpacts() {
+    return issue.getImpacts();
   }
 
   @CheckForNull

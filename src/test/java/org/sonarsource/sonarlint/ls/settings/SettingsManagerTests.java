@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -21,14 +21,17 @@ package org.sonarsource.sonarlint.ls.settings;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonPrimitive;
 import java.io.File;
 import java.net.URI;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import javax.annotation.Nullable;
+import org.eclipse.lsp4j.MessageType;
 import org.eclipse.lsp4j.WorkspaceFolder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -43,7 +46,6 @@ import org.sonarsource.sonarlint.ls.backend.BackendServiceFacade;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingManager;
 import org.sonarsource.sonarlint.ls.folders.WorkspaceFolderWrapper;
 import org.sonarsource.sonarlint.ls.folders.WorkspaceFoldersManager;
-import org.sonarsource.sonarlint.ls.http.ApacheHttpClientProvider;
 import org.sonarsource.sonarlint.ls.util.Utils;
 import testutils.ImmediateExecutorService;
 import testutils.SonarLintLogTester;
@@ -52,12 +54,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.entry;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.sonarsource.sonarlint.ls.settings.SettingsManager.ANALYZER_PROPERTIES;
 
 class SettingsManagerTests {
 
@@ -142,8 +143,7 @@ class SettingsManagerTests {
     var backend = mock(BackendService.class);
     when(backendFacade.getInitParams()).thenReturn(new BackendInitParams());
     when(backendFacade.getBackendService()).thenReturn(backend);
-    underTest = new SettingsManager(client, foldersManager, mock(ApacheHttpClientProvider.class), new ImmediateExecutorService(), backendFacade);
-    underTest.setBindingManager(bindingManager);
+    underTest = new SettingsManager(client, foldersManager, new ImmediateExecutorService(), backendFacade, logTester.getLogger());
     underTest = spy(underTest);
   }
 
@@ -162,7 +162,7 @@ class SettingsManagerTests {
   }
 
   private void mockConfigurationRequest(@Nullable URI uri, String json) {
-    doReturn(CompletableFuture.supplyAsync(() -> fromJsonString(json))).when(underTest).requestSonarLintConfigurationAsync(uri);
+    doReturn(CompletableFuture.supplyAsync(() -> fromJsonString(json))).when(underTest).requestSonarLintAndOmnisharpConfigurationAsync(uri);
   }
 
   @Test
@@ -221,11 +221,11 @@ class SettingsManagerTests {
 
     var settings = underTest.getCurrentSettings();
     assertThat(settings.getServerConnections()).isEmpty();
-    assertThat(logTester.logs(Level.ERROR))
-      .containsExactly("Incomplete server connection configuration. Required parameters must not be blank: serverId.",
-        "Incomplete server connection configuration. Required parameters must not be blank: serverUrl.",
-        "Incomplete SonarQube server connection configuration. Required parameters must not be blank: serverUrl.",
-        "Incomplete SonarCloud connection configuration. Required parameters must not be blank: organizationKey.");
+    assertThat(logTester.logs(MessageType.Log))
+      .anyMatch(log -> log.contains("Incomplete server connection configuration. Required parameters must not be blank: serverId."))
+      .anyMatch(log -> log.contains("Incomplete server connection configuration. Required parameters must not be blank: serverUrl."))
+      .anyMatch(log -> log.contains("Incomplete SonarQube server connection configuration. Required parameters must not be blank: serverUrl."))
+      .anyMatch(log -> log.contains("Incomplete SonarCloud connection configuration. Required parameters must not be blank: organizationKey."));
   }
 
   @Test
@@ -246,7 +246,7 @@ class SettingsManagerTests {
 
     var settings = underTest.getCurrentSettings();
     assertThat(settings.getServerConnections()).containsKeys("dup");
-    assertThat(logTester.logs(Level.ERROR)).containsExactly("Multiple server connections with the same identifier 'dup'. Fix your settings.");
+    assertThat(logTester.logs(MessageType.Log)).anyMatch(log -> log.contains("Multiple server connections with the same identifier 'dup'. Fix your settings."));
   }
 
   @Test
@@ -267,7 +267,7 @@ class SettingsManagerTests {
 
     var settings = underTest.getCurrentSettings();
     assertThat(settings.getServerConnections()).containsKeys("<default>");
-    assertThat(logTester.logs(Level.ERROR)).containsExactly("Please specify a unique 'connectionId' in your settings for each of the SonarQube/SonarCloud connections.");
+    assertThat(logTester.logs(MessageType.Log)).anyMatch(log -> log.contains("Please specify a unique 'connectionId' in your settings for each of the SonarQube/SonarCloud connections."));
   }
 
   @Test
@@ -300,8 +300,8 @@ class SettingsManagerTests {
     var settings = underTest.getCurrentDefaultFolderSettings();
     assertThat(settings.getConnectionId()).isNull();
     assertThat(settings.getProjectKey()).isEqualTo("myProject");
-    assertThat(logTester.logs(Level.ERROR))
-      .contains("No SonarQube/SonarCloud connections defined for your binding. Please update your settings.");
+    assertThat(logTester.logs(MessageType.Log))
+      .anyMatch(log -> log.contains("No SonarQube/SonarCloud connections defined for your binding. Please update your settings."));
   }
 
   @Test
@@ -359,7 +359,7 @@ class SettingsManagerTests {
       "    }\n" +
       "  }\n" +
       "}\n");
-    var folderWrapper = new WorkspaceFolderWrapper(FOLDER_URI, new WorkspaceFolder());
+    var folderWrapper = new WorkspaceFolderWrapper(FOLDER_URI, new WorkspaceFolder(), logTester.getLogger());
     when(foldersManager.getAll()).thenReturn(List.of(folderWrapper));
 
     underTest.didChangeConfiguration();
@@ -367,8 +367,8 @@ class SettingsManagerTests {
     var settings = folderWrapper.getSettings();
     assertThat(settings.getConnectionId()).isNull();
     assertThat(settings.getProjectKey()).isEqualTo("myProject");
-    assertThat(logTester.logs(Level.ERROR))
-      .containsExactly("Multiple connections defined in your settings. Please specify a 'connectionId' in your binding with one of [sc1,sq1,sc2,sq2] to disambiguate.");
+    assertThat(logTester.logs(MessageType.Log))
+      .anyMatch(log -> log.contains("Multiple connections defined in your settings. Please specify a 'connectionId' in your binding with one of [sc1,sq1,sc2,sq2] to disambiguate."));
   }
 
   @Test
@@ -383,7 +383,7 @@ class SettingsManagerTests {
       "    }\n" +
       "  }\n" +
       "}\n");
-    var folderWrapper = new WorkspaceFolderWrapper(FOLDER_URI, new WorkspaceFolder());
+    var folderWrapper = new WorkspaceFolderWrapper(FOLDER_URI, new WorkspaceFolder(), logTester.getLogger());
     when(foldersManager.getAll()).thenReturn(List.of(folderWrapper));
 
     underTest.didChangeConfiguration();
@@ -391,8 +391,8 @@ class SettingsManagerTests {
     var settings = folderWrapper.getSettings();
     assertThat(settings.getConnectionId()).isEqualTo("unknown");
     assertThat(settings.getProjectKey()).isEqualTo("myProject");
-    assertThat(logTester.logs(Level.ERROR))
-      .containsExactly("No SonarQube/SonarCloud connections defined for your binding with id 'unknown'. Please update your settings.");
+    assertThat(logTester.logs(MessageType.Log))
+      .anyMatch(log -> log.contains("No SonarQube/SonarCloud connections defined for your binding with id 'unknown'. Please update your settings."));
   }
 
   @Test
@@ -467,7 +467,7 @@ class SettingsManagerTests {
     var workspaceFolderUri = workspaceFolder.toUri();
     mockConfigurationRequest(null, FULL_SAMPLE_CONFIG);
     mockConfigurationRequest(workspaceFolderUri, config);
-    var folderWrapper = new WorkspaceFolderWrapper(workspaceFolderUri, new WorkspaceFolder());
+    var folderWrapper = new WorkspaceFolderWrapper(workspaceFolderUri, new WorkspaceFolder(), logTester.getLogger());
     when(foldersManager.getAll()).thenReturn(List.of(folderWrapper));
 
     underTest.didChangeConfiguration();
@@ -490,7 +490,7 @@ class SettingsManagerTests {
     var workspaceFolderUri = workspaceFolder.toUri();
     mockConfigurationRequest(null, FULL_SAMPLE_CONFIG);
     mockConfigurationRequest(workspaceFolderUri, config);
-    var folderWrapper = new WorkspaceFolderWrapper(workspaceFolderUri, new WorkspaceFolder());
+    var folderWrapper = new WorkspaceFolderWrapper(workspaceFolderUri, new WorkspaceFolder(), logTester.getLogger());
     when(foldersManager.getAll()).thenReturn(List.of(folderWrapper));
 
     underTest.didChangeConfiguration();
@@ -513,7 +513,7 @@ class SettingsManagerTests {
     var workspaceFolderUri = workspaceFolder.toUri();
     mockConfigurationRequest(null, FULL_SAMPLE_CONFIG);
     mockConfigurationRequest(workspaceFolderUri, config);
-    var folderWrapper = new WorkspaceFolderWrapper(workspaceFolderUri, new WorkspaceFolder());
+    var folderWrapper = new WorkspaceFolderWrapper(workspaceFolderUri, new WorkspaceFolder(), logTester.getLogger());
     when(foldersManager.getAll()).thenReturn(List.of(folderWrapper));
 
     underTest.didChangeConfiguration();
@@ -538,8 +538,8 @@ class SettingsManagerTests {
     underTest.didChangeConfiguration();
     underTest.getCurrentSettings();
 
-    assertThat(logTester.logs(Level.WARN))
-      .containsExactly("Using ${workspaceFolder} variable in sonarlint.pathToCompileCommands is only supported for files in the workspace");
+    assertThat(logTester.logs(MessageType.Log))
+      .anyMatch(log -> log.contains("Using ${workspaceFolder} variable in sonarlint.pathToCompileCommands is only supported for files in the workspace"));
   }
 
   @Test
@@ -577,8 +577,8 @@ class SettingsManagerTests {
     underTest.didChangeConfiguration();
     underTest.getCurrentSettings();
 
-    assertThat(logTester.logs(Level.ERROR))
-      .containsExactly("Variable ${workspaceFolder} for sonarlint.pathToCompileCommands should be the prefix.");
+    assertThat(logTester.logs(MessageType.Log))
+      .anyMatch(log -> log.contains("Variable ${workspaceFolder} for sonarlint.pathToCompileCommands should be the prefix."));
   }
 
   @Test
@@ -595,126 +595,14 @@ class SettingsManagerTests {
     var workspaceFolderUri = URI.create("notfile:///workspace/folder");
     mockConfigurationRequest(null, FULL_SAMPLE_CONFIG);
     mockConfigurationRequest(workspaceFolderUri, config);
-    var folderWrapper = new WorkspaceFolderWrapper(workspaceFolderUri, new WorkspaceFolder());
+    var folderWrapper = new WorkspaceFolderWrapper(workspaceFolderUri, new WorkspaceFolder(), logTester.getLogger());
     when(foldersManager.getAll()).thenReturn(List.of(folderWrapper));
 
     underTest.didChangeConfiguration();
 
     folderWrapper.getSettings();
-    assertThat(logTester.logs(Level.ERROR))
-      .contains("Workspace folder is not in local filesystem, analysis not supported.");
-  }
-
-  @Test
-  void should_subscribe_for_server_events_when_binding_a_folder() {
-    var folderWrapper = new WorkspaceFolderWrapper(FOLDER_URI, new WorkspaceFolder());
-    when(foldersManager.getAll()).thenReturn(List.of(folderWrapper));
-    mockConfigurationRequest(null, FULL_SAMPLE_CONFIG);
-    mockConfigurationRequest(FOLDER_URI, FULL_SAMPLE_CONFIG);
-
-    underTest.didChangeConfiguration();
-
-    verify(bindingManager).subscribeForServerEvents("sq1");
-  }
-
-  @Test
-  void should_resubscribe_for_server_events_when_changing_project_key() {
-    var folderWrapper = new WorkspaceFolderWrapper(FOLDER_URI, new WorkspaceFolder());
-    when(foldersManager.getAll()).thenReturn(List.of(folderWrapper));
-    mockConfigurationRequest(null, FULL_SAMPLE_CONFIG);
-    mockConfigurationRequest(FOLDER_URI, FULL_SAMPLE_CONFIG);
-
-    underTest.didChangeConfiguration();
-
-    verify(bindingManager).subscribeForServerEvents("sq1");
-    clearInvocations(bindingManager);
-
-    var newConfiguration = "{\n" +
-      "  \"connectedMode\": {\n" +
-      "    \"connections\": {\n" +
-      "      \"sonarqube\": [\n" +
-      "        { \"connectionId\": \"sq1\", \"serverUrl\": \"https://mysonarqube1.mycompany.org\", \"token\": \"ab12\" }" +
-      "      ]\n" +
-      "    },\n" +
-      "    \"project\": {\n" +
-      "      \"connectionId\": \"sq1\",\n" +
-      "      \"projectKey\": \"myProject2\"\n" +
-      "    }\n" +
-      "  }\n" +
-      "}";
-    mockConfigurationRequest(null, newConfiguration);
-    mockConfigurationRequest(FOLDER_URI, newConfiguration);
-
-    underTest.didChangeConfiguration();
-
-    verify(bindingManager).subscribeForServerEvents("sq1");
-  }
-
-  @Test
-  void should_resubscribe_for_server_events_when_changing_url() {
-    var folderWrapper = new WorkspaceFolderWrapper(FOLDER_URI, new WorkspaceFolder());
-    when(foldersManager.getAll()).thenReturn(List.of(folderWrapper));
-    mockConfigurationRequest(null, FULL_SAMPLE_CONFIG);
-    mockConfigurationRequest(FOLDER_URI, FULL_SAMPLE_CONFIG);
-
-    underTest.didChangeConfiguration();
-
-    verify(bindingManager).subscribeForServerEvents("sq1");
-    clearInvocations(bindingManager);
-
-    var newConfiguration = "{\n" +
-      "  \"connectedMode\": {\n" +
-      "    \"connections\": {\n" +
-      "      \"sonarqube\": [\n" +
-      "        { \"connectionId\": \"sq1\", \"serverUrl\": \"https://mysonarqube2.mycompany.org\", \"token\": \"ab12\" }" +
-      "      ]\n" +
-      "    },\n" +
-      "    \"project\": {\n" +
-      "      \"connectionId\": \"sq1\",\n" +
-      "      \"projectKey\": \"myProject\"\n" +
-      "    }\n" +
-      "  }\n" +
-      "}";
-    mockConfigurationRequest(null, newConfiguration);
-    mockConfigurationRequest(FOLDER_URI, newConfiguration);
-
-    underTest.didChangeConfiguration();
-
-    verify(bindingManager).subscribeForServerEvents("sq1");
-  }
-
-  @Test
-  void should_resubscribe_for_server_events_when_changing_token() {
-    var folderWrapper = new WorkspaceFolderWrapper(FOLDER_URI, new WorkspaceFolder());
-    when(foldersManager.getAll()).thenReturn(List.of(folderWrapper));
-    mockConfigurationRequest(null, FULL_SAMPLE_CONFIG);
-    mockConfigurationRequest(FOLDER_URI, FULL_SAMPLE_CONFIG);
-
-    underTest.didChangeConfiguration();
-
-    verify(bindingManager).subscribeForServerEvents("sq1");
-    clearInvocations(bindingManager);
-
-    // should not react on change of the token in settings file, only to change of server URL
-    var newConfiguration = "{\n" +
-      "  \"connectedMode\": {\n" +
-      "    \"connections\": {\n" +
-      "      \"sonarqube\": [\n" +
-      "        { \"connectionId\": \"sq1\", \"serverUrl\": \"https://mysonarqube11.mycompany.org\", \"token\": \"ab12\" }" +
-      "      ]\n" +
-      "    },\n" +
-      "    \"project\": {\n" +
-      "      \"connectionId\": \"sq1\",\n" +
-      "      \"projectKey\": \"myProject\"\n" +
-      "    }\n" +
-      "  }\n" +
-      "}";
-    mockConfigurationRequest(null, newConfiguration);
-    mockConfigurationRequest(FOLDER_URI, newConfiguration);
-
-    underTest.didChangeConfiguration();
-
-    verify(bindingManager).subscribeForServerEvents("sq1");
+    assertThat(logTester.logs(MessageType.Log))
+      .anyMatch(log -> log.contains("Workspace folder is not in local filesystem, analysis not supported."));
   }
 
   @Test
@@ -736,8 +624,8 @@ class SettingsManagerTests {
 
     underTest.didChangeConfiguration();
 
-    assertThat(logTester.logs(Level.ERROR))
-      .contains("Can't get token for server https://mysonarqube1.mycompany.org");
+    assertThat(logTester.logs(MessageType.Log))
+      .anyMatch(log -> log.contains("Can't get token for server https://mysonarqube1.mycompany.org"));
   }
 
   @Test
@@ -759,8 +647,8 @@ class SettingsManagerTests {
 
     underTest.didChangeConfiguration();
 
-    assertThat(logTester.logs(Level.ERROR))
-      .contains("Can't get token for server https://mysonarqube1.mycompany.org");
+    assertThat(logTester.logs(MessageType.Log))
+      .anyMatch(log -> log.contains("Can't get token for server https://mysonarqube1.mycompany.org"));
   }
 
   @Test
@@ -772,6 +660,39 @@ class SettingsManagerTests {
   @Test
   void shouldReturnDefaultConnectionIdIfNull() {
     assertThat(SettingsManager.connectionIdOrDefault(null)).isEqualTo(SettingsManager.DEFAULT_CONNECTION_ID);
+  }
+
+  @Test
+  void shouldUpdateAnalyzerProperties() {
+    var workspaceUri = URI.create("file:///User/user/documents/project");
+    List<Object> response = List.of("{\"disableTelemetry\": false,\"focusOnNewCode\": true}",
+      new JsonPrimitive("Roslyn.sln"),
+      new JsonPrimitive("true"),
+      new JsonPrimitive("false"),
+      new JsonPrimitive("600"));
+    Map<String, Object> settingsMap = new HashMap<>(Map.of("disableTelemetry", false, "focusOnNewCode", true));
+
+    var result = SettingsManager.updateAnalyzerProperties(workspaceUri, response, settingsMap);
+
+    assertThat(result).containsKey(ANALYZER_PROPERTIES);
+    var analyzerProperties = (Map<String, String>) result.get(ANALYZER_PROPERTIES);
+    assertThat(analyzerProperties).contains(entry("sonar.cs.internal.useNet6", "true"),
+      entry("sonar.cs.internal.loadProjectOnDemand", "false"),
+      entry("sonar.cs.internal.loadProjectsTimeout", "600"));
+    assertThat(analyzerProperties.get("sonar.cs.internal.solutionPath")).endsWith("Roslyn.sln");
+  }
+
+  @Test
+  void shouldIgnoreRazorFiles() {
+    var workspaceUri = URI.create("file:///User/user/documents/project");
+    List<Object> response = List.of("{\"disableTelemetry\": false,\"focusOnNewCode\": true, \"analyzerProperties\":{\"sonar.cs.file.suffixes\":\".cs\",\".razor\"}");
+    Map<String, Object> settingsMap = new HashMap<>(Map.of("disableTelemetry", false, "focusOnNewCode", true, "analyzerProperties", new HashMap<>(Map.of("sonar.cs.file.suffixes", ".cs,.razor"))));
+
+    var result = SettingsManager.updateAnalyzerProperties(workspaceUri, response, settingsMap);
+
+    assertThat(result).containsKey(ANALYZER_PROPERTIES);
+    var analyzerProperties = (Map<String, String>) result.get(ANALYZER_PROPERTIES);
+    assertThat(analyzerProperties).contains(entry("sonar.cs.file.suffixes", ".cs"));
   }
 
   private static Map<String, Object> fromJsonString(String json) {

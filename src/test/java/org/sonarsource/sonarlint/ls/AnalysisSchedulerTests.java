@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -21,6 +21,8 @@ package org.sonarsource.sonarlint.ls;
 
 import java.net.URI;
 import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
@@ -45,6 +47,7 @@ import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.when;
 
 class AnalysisSchedulerTests {
 
@@ -55,15 +58,20 @@ class AnalysisSchedulerTests {
   private OpenFilesCache openFilesCache;
   private OpenNotebooksCache openNotebooksCache;
   private LanguageClientLogger lsLogOutput;
+  private SonarLintExtendedLanguageClient client;
 
   @BeforeEach
   public void init() {
     lsLogOutput = mock(LanguageClientLogger.class);
     taskExecutor = mock(AnalysisTaskExecutor.class);
+    client = mock(SonarLintExtendedLanguageClient.class);
+    when(client.filterOutExcludedFiles(any()))
+      .thenReturn(CompletableFuture.completedFuture(
+        new SonarLintExtendedLanguageClient.FileUrisResult(List.of("file://Foo1.java", "file://Foo2.java"))));
     openFilesCache = new OpenFilesCache(lsLogOutput);
     openNotebooksCache = new OpenNotebooksCache(lsLogOutput, mock(NotebookDiagnosticPublisher.class));
     underTest = new AnalysisScheduler(lsLogOutput, mock(WorkspaceFoldersManager.class), mock(ProjectBindingManager.class), openFilesCache,
-      openNotebooksCache, taskExecutor, 200);
+      openNotebooksCache, taskExecutor, 200, client);
 
     underTest.initialize();
   }
@@ -248,7 +256,7 @@ class AnalysisSchedulerTests {
 
     var file = openFilesCache.didOpen(JS_FILE_URI, "javascript", "alert(1);", 1);
     underTest.didOpen(file);
-    verify(lsLogOutput, timeout(1000)).debug("Queuing analysis of file '" + JS_FILE_URI + "' (version 1)");
+    verify(lsLogOutput, timeout(1000)).debug("Queuing analysis of file \"" + JS_FILE_URI + "\" (version 1)");
     verify(taskExecutor, timeout(1000)).run(any());
 
     reset(taskExecutor);
@@ -256,7 +264,7 @@ class AnalysisSchedulerTests {
     openFilesCache.didChange(JS_FILE_URI, "alert(2);", 2);
     underTest.didChange(file.getUri());
 
-    verify(lsLogOutput, timeout(1000)).debug("Queuing analysis of file '" + JS_FILE_URI + "' (version 2)");
+    verify(lsLogOutput, timeout(1000)).debug("Queuing analysis of file \"" + JS_FILE_URI + "\" (version 2)");
 
     // Analysis of version 2 is stuck in the executor service queue because analysis of version 1 is still running
     verify(taskExecutor, timeout(1000).times(0)).run(any());
@@ -267,7 +275,7 @@ class AnalysisSchedulerTests {
     underTest.didChange(file.getUri());
 
     verify(lsLogOutput, timeout(1000).times(1)).debug("Attempt to cancel previous analysis...");
-    verify(lsLogOutput, timeout(1000)).debug("Queuing analysis of file '" + JS_FILE_URI + "' (version 3)");
+    verify(lsLogOutput, timeout(1000)).debug("Queuing analysis of file \"" + JS_FILE_URI + "\" (version 3)");
     verifyNoMoreInteractions(lsLogOutput);
 
     analysisTaskShouldStop.set(true);

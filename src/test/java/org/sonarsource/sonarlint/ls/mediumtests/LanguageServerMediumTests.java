@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -20,8 +20,10 @@
 package org.sonarsource.sonarlint.ls.mediumtests;
 
 import com.google.gson.JsonPrimitive;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.HashMap;
@@ -59,6 +61,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.sonarsource.sonarlint.core.clientapi.backend.binding.GetBindingSuggestionParams;
+import org.sonarsource.sonarlint.core.commons.CleanCodeAttribute;
+import org.sonarsource.sonarlint.core.commons.CleanCodeAttributeCategory;
+import org.sonarsource.sonarlint.core.commons.ImpactSeverity;
+import org.sonarsource.sonarlint.core.commons.SoftwareQuality;
+import org.sonarsource.sonarlint.core.serverapi.proto.sonarqube.ws.Components;
 import org.sonarsource.sonarlint.ls.DiagnosticPublisher;
 import org.sonarsource.sonarlint.ls.Rule;
 import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageClient;
@@ -71,6 +78,7 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.groups.Tuple.tuple;
 import static org.awaitility.Awaitility.await;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -80,6 +88,7 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
   private static final String TOKEN = "token";
   private static final String PYTHON_S1481 = "python:S1481";
   private static final String PYTHON_S139 = "python:S139";
+  private static final String JAVA_S2095 = "java:S2095";
   private static final String GO_S1862 = "go:S1862";
   private static final String GO_S108 = "go:S108";
   @RegisterExtension
@@ -87,16 +96,22 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
   public static final String CLOUDFORMATION_S6273 = "cloudformation:S6273";
   public static final String DOCKER_S6476 = "docker:S6476";
   public static final String TERRAFORM_S6273 = "terraform:S6273";
+  public static final String ARM_S4423 = "azureresourcemanager:S4423";
+  private static Path omnisharpDir;
 
   @BeforeAll
   static void initialize() throws Exception {
+    omnisharpDir = makeStaticTempDir();
     initialize(Map.of(
       "telemetryStorage", "not/exists",
       "productName", "SLCORE tests",
       "productVersion", "0.1",
       "showVerboseLogs", false,
-      "additionalAttributes", Map.of("extra", "value")));
-
+      "additionalAttributes", Map.of(
+        "extra", "value",
+        "omnisharpDirectory", omnisharpDir.toString()
+      )
+    ));
   }
 
   @BeforeEach
@@ -108,6 +123,7 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
   public void mockSonarQube() {
     mockWebServerExtension.addStringResponse("/api/system/status", "{\"status\": \"UP\", \"version\": \"9.3\", \"id\": \"xzy\"}");
     mockWebServerExtension.addStringResponse("/api/authentication/validate?format=json", "{\"valid\": true}");
+    mockWebServerExtension.addProtobufResponse("/api/components/search.protobuf?qualifiers=TRK&ps=500&p=1", Components.SearchWsResponse.newBuilder().build());
   }
 
   @Test
@@ -118,8 +134,8 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
     awaitUntilAsserted(() -> assertThat(client.getDiagnostics(uri))
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
       .containsExactlyInAnyOrder(
-        tuple(1, 6, 1, 10, "javascript:S1481", "sonarlint", "Remove the declaration of the unused 'toto' variable.", DiagnosticSeverity.Information),
-        tuple(2, 6, 2, 11, "javascript:S1481", "sonarlint", "Remove the declaration of the unused 'plouf' variable.", DiagnosticSeverity.Information)));
+        tuple(1, 6, 1, 10, "javascript:S1481", "sonarlint", "Remove the declaration of the unused 'toto' variable.", DiagnosticSeverity.Warning),
+        tuple(2, 6, 2, 11, "javascript:S1481", "sonarlint", "Remove the declaration of the unused 'plouf' variable.", DiagnosticSeverity.Warning)));
   }
 
   @Test
@@ -182,10 +198,10 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
       .containsExactly(
         tuple(7, 15, 7, 39, CLOUDFORMATION_S6273,
           "sonarlint", "Rename tag key \"anycompany:cost-center\" to match the regular expression \"^([A-Z][A-Za-z]*:)*([A-Z][A-Za-z]*)$\".",
-          DiagnosticSeverity.Information),
+          DiagnosticSeverity.Warning),
         tuple(9, 15, 9, 43, CLOUDFORMATION_S6273, "sonarlint",
           "Rename tag key \"anycompany:EnvironmentType\" to match the regular expression \"^([A-Z][A-Za-z]*:)*([A-Z][A-Za-z]*)$\".",
-          DiagnosticSeverity.Information)));
+          DiagnosticSeverity.Warning)));
   }
 
   @Test
@@ -223,7 +239,61 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
       .containsExactly(
         tuple(4, 4, 4, 28, TERRAFORM_S6273, "sonarlint",
-          "Rename tag key \"anycompany:cost-center\" to match the regular expression \"^([A-Z][A-Za-z]*:)*([A-Z][A-Za-z]*)$\".", DiagnosticSeverity.Information)));
+          "Rename tag key \"anycompany:cost-center\" to match the regular expression \"^([A-Z][A-Za-z]*:)*([A-Z][A-Za-z]*)$\".", DiagnosticSeverity.Warning)));
+  }
+
+  @Test
+  void analyzeSimpleBicepFileOnOpen() throws Exception {
+    setRulesConfig(client.globalSettings, ARM_S4423, "on");
+    notifyConfigurationChangeOnClient();
+
+    var uri = getUri("sampleBicep.bicep");
+
+    didOpen(uri, "bicep", """
+      resource mysqlDbServer 'Microsoft.DBforMySQL/servers@2017-12-01' = {
+        name: 'example'
+        properties: {
+          minimalTlsVersion: 'TLS1_0'
+        }
+      }
+      """);
+
+    awaitUntilAsserted(() -> assertThat(client.getDiagnostics(uri))
+      .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
+      .containsExactly(
+        tuple(3, 4, 3, 31, ARM_S4423, "sonarlint",
+          "Change this code to disable support of older TLS versions.", DiagnosticSeverity.Warning)));
+  }
+
+  @Test
+  void analyzeSimpleArmJsonFileOnOpen() throws Exception {
+    setRulesConfig(client.globalSettings, ARM_S4423, "on");
+    notifyConfigurationChangeOnClient();
+
+    var uri = getUri("sampleArm.json");
+
+    didOpen(uri, "json", """
+      {
+        "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+        "contentVersion": "1.0.0.0",
+        "resources": [
+          {
+            "type": "Microsoft.DBforMySQL/servers",
+            "apiVersion": "2017-12-01",
+            "name": "Raise an issue: older TLS versions shouldn't be allowed",
+            "properties": {
+              "minimalTlsVersion": "TLS1_0"
+            }
+          }
+        ]
+      }
+      """);
+
+    awaitUntilAsserted(() -> assertThat(client.getDiagnostics(uri))
+      .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
+      .containsExactly(
+        tuple(9, 8, 9, 37, ARM_S4423, "sonarlint",
+          "Change this code to disable support of older TLS versions.", DiagnosticSeverity.Warning)));
   }
 
   @Test
@@ -245,12 +315,12 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
 
     var uri = getUri("analyzeSimplePythonFileOnOpen.py");
 
-    client.isOpenInEditor = false;
+    client.shouldAnalyseFile = false;
     didOpen(uri, "python", "def foo():\n  print 'toto'\n");
 
     awaitUntilAsserted(() -> assertThat(client.logs)
       .extracting(withoutTimestamp())
-      .contains("[Debug] Skipping analysis for preview of file " + uri));
+      .contains("[Info] reason \"" + uri + "\""));
     assertThat(client.getDiagnostics(uri)).isEmpty();
   }
 
@@ -265,8 +335,8 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
     awaitUntilAsserted(() -> assertThat(client.getDiagnostics(uri))
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
       .containsExactlyInAnyOrder(
-        tuple(1, 2, 1, 6, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"toto\".", DiagnosticSeverity.Information),
-        tuple(2, 2, 2, 7, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"plouf\".", DiagnosticSeverity.Information)));
+        tuple(1, 2, 1, 6, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"toto\".", DiagnosticSeverity.Warning),
+        tuple(2, 2, 2, 7, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"plouf\".", DiagnosticSeverity.Warning)));
 
     client.clear();
 
@@ -277,7 +347,7 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
     awaitUntilAsserted(() -> assertThat(client.getDiagnostics(uri))
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
       .containsExactlyInAnyOrder(
-        tuple(2, 14, 2, 69, PYTHON_S139, "sonarlint", "Move this trailing comment on the previous empty line.", DiagnosticSeverity.Information)
+        tuple(2, 14, 2, 69, PYTHON_S139, "sonarlint", "Move this trailing comment on the previous empty line.", DiagnosticSeverity.Warning)
         // Expected issues on python:S1481 are suppressed by rule configuration
       ));
   }
@@ -311,10 +381,10 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
     awaitUntilAsserted(() -> assertThat(client.getDiagnostics(uri))
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
       .containsExactlyInAnyOrder(
-        tuple(0, 0, 0, 0, "php:S113", "sonarlint", "Add a new line at the end of this file.", DiagnosticSeverity.Information),
-        tuple(1, 15, 1, 16, "php:S1808", "sonarlint", "Move this open curly brace to the beginning of the next line.", DiagnosticSeverity.Information),
+        tuple(0, 0, 0, 0, "php:S113", "sonarlint", "Add a new line at the end of this file.", DiagnosticSeverity.Warning),
+        tuple(1, 15, 1, 16, "php:S1808", "sonarlint", "Move this open curly brace to the beginning of the next line.", DiagnosticSeverity.Warning),
         tuple(2, 2, 2, 6, "php:S2041", "sonarlint", "Remove the parentheses from this \"echo\" call.", DiagnosticSeverity.Warning),
-        tuple(4, 0, 4, 2, "php:S1780", "sonarlint", "Remove this closing tag \"?>\".", DiagnosticSeverity.Information)));
+        tuple(4, 0, 4, 2, "php:S1780", "sonarlint", "Remove this closing tag \"?>\".", DiagnosticSeverity.Warning)));
   }
 
   @Test
@@ -356,7 +426,7 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
     notifyConfigurationChangeOnClient();
 
     assertLogContains(
-      "Default settings updated: WorkspaceFolderSettings[analyzerProperties={},connectionId=<null>,pathToCompileCommands=<null>,projectKey=<null>,testFilePattern={**/*Test*}]");
+      "Default settings updated: WorkspaceFolderSettings[analyzerProperties={sonar.cs.file.suffixes=.cs, sonar.cs.internal.loadProjectsTimeout=60, sonar.cs.internal.useNet6=true, sonar.cs.internal.loadProjectOnDemand=false},connectionId=<null>,pathToCompileCommands=<null>,projectKey=<null>,testFilePattern={**/*Test*}]");
 
     var jsContent = "function foo() {\n  let toto = 0;\n}";
     var fooTestUri = getUri("fooTest.js");
@@ -372,7 +442,7 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
     setShowVerboseLogs(client.globalSettings, true);
     notifyConfigurationChangeOnClient();
     assertLogContains(
-      "Default settings updated: WorkspaceFolderSettings[analyzerProperties={},connectionId=<null>,pathToCompileCommands=<null>,projectKey=<null>,testFilePattern={**/*MyTest*}]");
+      "Default settings updated: WorkspaceFolderSettings[analyzerProperties={sonar.cs.file.suffixes=.cs, sonar.cs.internal.loadProjectsTimeout=60, sonar.cs.internal.useNet6=true, sonar.cs.internal.loadProjectOnDemand=false},connectionId=<null>,pathToCompileCommands=<null>,projectKey=<null>,testFilePattern={**/*MyTest*}]");
 
     didChange(fooTestUri, jsContent);
     awaitUntilAsserted(() -> assertThat(client.getDiagnostics(fooTestUri)).hasSize(1));
@@ -401,7 +471,27 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
 
     awaitUntilAsserted(() -> assertThat(client.getDiagnostics(uri))
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
-      .containsExactly(tuple(1, 2, 1, 6, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"toto\".", DiagnosticSeverity.Information)));
+      .containsExactly(tuple(1, 2, 1, 6, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"toto\".", DiagnosticSeverity.Warning)));
+  }
+
+  @Test
+  void cleanUpDiagnosticsOnFileClose() throws IOException {
+    var uri = getUri("foo.html");
+
+    didOpen(uri, "html", "<html><body></body></html>");
+
+    awaitUntilAsserted(() -> assertThat(client.getDiagnostics(uri))
+      .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
+      .containsExactlyInAnyOrder(
+        tuple(0, 0, 0, 6, "Web:DoctypePresenceCheck", "sonarlint", "Insert a <!DOCTYPE> declaration to before this <html> tag.",
+          DiagnosticSeverity.Warning),
+        tuple(0, 0, 0, 6, "Web:S5254", "sonarlint", "Add \"lang\" and/or \"xml:lang\" attributes to this \"<html>\" element",
+          DiagnosticSeverity.Warning),
+        tuple(0, 0, 0, 26, "Web:PageWithoutTitleCheck", "sonarlint", "Add a <title> tag to this page.", DiagnosticSeverity.Warning)));
+
+    didClose(uri);
+
+    awaitUntilAsserted(() -> assertThat(client.getDiagnostics(uri)).isEmpty());
   }
 
   @Test
@@ -416,7 +506,7 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
     awaitUntilAsserted(() -> assertThat(client.getDiagnostics(uri))
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
       .containsExactly(
-        tuple(2, 2, 2, 27, "xml:S1135", "sonarlint", "Complete the task associated to this \"TODO\" comment.", DiagnosticSeverity.Hint)));
+        tuple(2, 2, 2, 27, "xml:S1135", "sonarlint", "Complete the task associated to this \"TODO\" comment.", DiagnosticSeverity.Warning)));
   }
 
   @Test
@@ -456,17 +546,17 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
 
     awaitUntilAsserted(() -> assertThat(client.logs)
       .extracting(withoutTimestamp())
-      .contains("[Debug] Queuing analysis of file '" + uri + "' (version 3)"));
+      .contains("[Debug] Queuing analysis of file \"" + uri + "\" (version 3)"));
 
     assertThat(client.logs)
       .extracting(withoutTimestamp())
-      .doesNotContain("[Debug] Queuing analysis of file '" + uri + "' (version 2)");
+      .doesNotContain("[Debug] Queuing analysis of file \"" + uri + "\" (version 2)");
 
     awaitUntilAsserted(() -> assertThat(client.getDiagnostics(uri))
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
       .containsExactly(
-        tuple(1, 2, 1, 6, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"toto\".", DiagnosticSeverity.Information),
-        tuple(2, 2, 2, 7, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"plouf\".", DiagnosticSeverity.Information)));
+        tuple(1, 2, 1, 6, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"toto\".", DiagnosticSeverity.Warning),
+        tuple(2, 2, 2, 7, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"plouf\".", DiagnosticSeverity.Warning)));
   }
 
   @Test
@@ -504,7 +594,7 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
     didOpen(uri, "python", "# Nothing to see here\n");
 
     awaitUntilAsserted(() -> assertThat(client.logs).extracting(withoutTimestamp())
-      .contains("[Debug] Skip analysis for SCM ignored file: '" + uri + "'"));
+      .contains("[Debug] Skip analysis for SCM ignored file: \"" + uri + "\""));
     assertThat(client.getDiagnostics(uri)).isEmpty();
   }
 
@@ -523,8 +613,8 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
     notifyConfigurationChangeOnClient();
 
     assertLogContains(
-      String.format("Global settings updated: WorkspaceSettings[connections={%s=ServerConnectionSettings[connectionId=%s,disableNotifications=false,organizationKey=<null>,serverUrl=%s,token=%s]},disableTelemetry=false,excludedRules=[],includedRules=[],pathToNodeExecutable=<null>,ruleParameters={},showAnalyzerLogs=false,showVerboseLogs=true]",
-        CONNECTION_ID, CONNECTION_ID, mockWebServerExtension.url("/"), TOKEN));
+      String.format("Global settings updated: WorkspaceSettings[connections={%s=ServerConnectionSettings[connectionId=%s,disableNotifications=false,organizationKey=<null>,serverUrl=%s]},disableTelemetry=false,excludedRules=[],focusOnNewCode=false,includedRules=[],pathToNodeExecutable=<null>,ruleParameters={},showAnalyzerLogs=false,showVerboseLogs=true]",
+        CONNECTION_ID, CONNECTION_ID, mockWebServerExtension.url("/")));
     // We are using the global system property to disable telemetry in tests, so this assertion do not pass
     // assertLogContainsInOrder( "Telemetry enabled");
   }
@@ -562,6 +652,18 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
     assertThat(client.ruleDesc.getSeverity()).isEqualTo("CRITICAL");
     assertThat(client.ruleDesc.getParameters()).isEmpty();
     assertThat(client.ruleDesc.getHtmlDescriptionTabs()).isEmpty();
+  }
+
+  @Test
+  void test_clean_code_taxonomy_fields_are_present() throws Exception {
+    client.showRuleDescriptionLatch = new CountDownLatch(1);
+    lsProxy.getWorkspaceService().executeCommand(new ExecuteCommandParams("SonarLint.OpenStandaloneRuleDesc", List.of(JAVA_S2095))).get();
+    assertTrue(client.showRuleDescriptionLatch.await(1, TimeUnit.MINUTES));
+
+    assertThat(client.ruleDesc.getKey()).isEqualTo(JAVA_S2095);
+    assertThat(client.ruleDesc.getCleanCodeAttribute()).isEqualTo(CleanCodeAttribute.COMPLETE.getIssueLabel());
+    assertThat(client.ruleDesc.getCleanCodeAttributeCategory()).isEqualTo(CleanCodeAttributeCategory.INTENTIONAL.getIssueLabel());
+    assertThat(client.ruleDesc.getImpacts()).containsExactly(Map.entry(SoftwareQuality.RELIABILITY.getDisplayLabel(), ImpactSeverity.HIGH.getDisplayLabel()));
   }
 
   @Test
@@ -616,7 +718,7 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
   void testListAllRules() {
     var result = lsProxy.listAllRules().join();
     String[] commercialLanguages = new String[]{"C", "C++"};
-    String[] freeLanguages = new String[]{"CSS", "CloudFormation", "Docker", "Go", "HTML", "IPython Notebooks", "Java",
+    String[] freeLanguages = new String[]{"AzureResourceManager", "CSS", "C#", "CloudFormation", "Docker", "Go", "HTML", "IPython Notebooks", "Java",
       "JavaScript", "Kubernetes", "PHP", "Python", "Secrets", "Terraform", "TypeScript", "XML"};
     if (COMMERCIAL_ENABLED) {
       awaitUntilAsserted(() -> assertThat(result).containsOnlyKeys(ArrayUtils.addAll(commercialLanguages, freeLanguages)));
@@ -640,7 +742,7 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
           new DidChangeWorkspaceFoldersParams(
             new WorkspaceFoldersChangeEvent(List.of(new WorkspaceFolder(folderUri, "No config")), Collections.emptyList())));
 
-      assertLogContainsPattern("\\[Error.*\\] Unable to fetch configuration of folder " + folderUri);
+      assertLogContainsPattern("\\[Error.*\\] Unable to fetch configuration of folder " + folderUri + ".*");
       assertLogContainsPattern("(?s).*Internal error.*");
     } finally {
       lsProxy.getWorkspaceService()
@@ -664,7 +766,7 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
       awaitLatch(client.settingsLatch);
 
       assertLogContains(
-        "Workspace folder 'WorkspaceFolder[name=Added,uri=file:///added_uri]' configuration updated: WorkspaceFolderSettings[analyzerProperties={},connectionId=<null>,pathToCompileCommands=<null>,projectKey=<null>,testFilePattern=another pattern]");
+        "Workspace folder 'WorkspaceFolder[name=Added,uri=file:///added_uri]' configuration updated: WorkspaceFolderSettings[analyzerProperties={sonar.cs.file.suffixes=.cs, sonar.cs.internal.loadProjectsTimeout=60, sonar.cs.internal.useNet6=true, sonar.cs.internal.loadProjectOnDemand=false},connectionId=<null>,pathToCompileCommands=<null>,projectKey=<null>,testFilePattern=another pattern]");
     } finally {
       lsProxy.getWorkspaceService()
         .didChangeWorkspaceFolders(
@@ -703,7 +805,7 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
       .filteredOn(notFromContextualTSserver())
       .extracting(withoutTimestamp())
       .containsExactly(
-        "[Info] Analyzing file '" + uri + "'...",
+        "[Info] Analyzing file \"" + uri + "\"...",
         "[Info] Found 1 issue"));
   }
 
@@ -721,8 +823,8 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
       .filteredOn(notFromContextualTSserver())
       .extracting(withoutTimestamp())
       .containsSubsequence(
-        "[Debug] Queuing analysis of file '" + uri + "' (version 1)",
-        "[Info] Analyzing file '" + uri + "'...",
+        "[Debug] Queuing analysis of file \"" + uri + "\" (version 1)",
+        "[Info] Analyzing file \"" + uri + "\"...",
         "[Info] Found 1 issue"));
   }
 
@@ -740,7 +842,7 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
       .filteredOn(notFromContextualTSserver())
       .extracting(withoutTimestamp())
       .contains(
-        "[Info] Analyzing file '" + uri + "'...",
+        "[Info] Analyzing file \"" + uri + "\"...",
         "[Info] Index files",
         "[Info] 1 file indexed",
         "[Info] 1 source file to be analyzed",
@@ -762,9 +864,9 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
       .filteredOn(notFromContextualTSserver())
       .extracting(withoutTimestamp())
       .contains(
-        "[Info] Analyzing file '" + uri + "'...",
+        "[Info] Analyzing file \"" + uri + "\"...",
         "[Info] Index files",
-        "[Debug] Language of file '" + uri + "' is set to 'Python'",
+        "[Debug] Language of file \"" + uri + "\" is set to \"Python\"",
         "[Info] 1 file indexed",
         "[Debug] Execute Sensor: Python Sensor",
         "[Info] Found 1 issue"));
@@ -837,6 +939,18 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
   }
 
   @Test
+  void testCheckNewSqConnection() throws ExecutionException, InterruptedException {
+    var serverUrl = mockWebServerExtension.url("/");
+    SonarLintExtendedLanguageServer.ConnectionCheckParams testParams = new SonarLintExtendedLanguageServer.ConnectionCheckParams(TOKEN, null, serverUrl);
+    CompletableFuture<SonarLintExtendedLanguageClient.ConnectionCheckResult> result = lsProxy.checkConnection(testParams);
+
+    SonarLintExtendedLanguageClient.ConnectionCheckResult actual = result.get();
+    assertThat(actual).isNotNull();
+    assertThat(actual.getConnectionId()).isEqualTo(serverUrl);
+    assertThat(actual.isSuccess()).isTrue();
+  }
+
+  @Test
   void testCheckConnectionWithKnownConnection() throws ExecutionException, InterruptedException {
     SonarLintExtendedLanguageServer.ConnectionCheckParams testParams = new SonarLintExtendedLanguageServer.ConnectionCheckParams(CONNECTION_ID);
     CompletableFuture<SonarLintExtendedLanguageClient.ConnectionCheckResult> result = lsProxy.checkConnection(testParams);
@@ -859,11 +973,11 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
 
   @Test
   void shouldUpdateConfigurationOnTokenChange() {
-    lsProxy.onTokenUpdate();
+    lsProxy.onTokenUpdate(new SonarLintExtendedLanguageServer.OnTokenUpdateNotificationParams("connectionId", "123456"));
 
     awaitUntilAsserted(() -> assertThat(client.logs)
       .extracting(withoutTimestamp())
-      .contains("[Info] Updating configuration on token change."));
+      .contains("[Info] Updating credentials on token change."));
     client.logs.clear();
   }
 
@@ -923,9 +1037,8 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
 
   @Test
   void getFilePatternsForAnalysis() throws ExecutionException, InterruptedException {
-    var result = lsProxy.getFilePatternsForAnalysis(new SonarLintExtendedLanguageServer.FolderUriParams("notBound")).get();
+    var result = lsProxy.getFilePatternsForAnalysis(new SonarLintExtendedLanguageServer.UriParams("notBound")).get();
 
-    assertThat(result.getPatterns()).hasSize(46);
     assertThat(result.getPatterns()).containsExactlyInAnyOrder("**/*.c",
       "**/*.h",
       "**/*.cc",
@@ -937,6 +1050,7 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
       "**/*.hxx",
       "**/*.h++",
       "**/*.ipp",
+      "**/*.cs",
       "**/*.css",
       "**/*.less",
       "**/*.scss",
@@ -971,7 +1085,46 @@ class LanguageServerMediumTests extends AbstractLanguageServerMediumTests {
       "**/*.yml",
       "**/*.yaml",
       "**/*.go",
-      "**/*.tf");
+      "**/*.tf",
+      "**/*.bicep",
+      "**/*.json");
+  }
+
+  @Test
+  void shouldRespectAnalysisExcludes() {
+    var fileName = "analyseOpenFileIgnoringExcludes.py";
+    var fileUri = temp.resolve(fileName).toUri().toString();
+    client.shouldAnalyseFile = false;
+
+    didOpen(fileUri, "py", "def foo():\n  toto = 0\n");
+
+    awaitUntilAsserted(() -> assertThat(client.getDiagnostics(fileUri)).isEmpty());
+  }
+
+  @Test
+  void analyseOpenFileIgnoringExcludes() {
+    var fileName = "analyseOpenFileIgnoringExcludes.py";
+    var fileUri = temp.resolve(fileName).toUri().toString();
+
+    lsProxy.analyseOpenFileIgnoringExcludes(new SonarLintExtendedLanguageServer.AnalyseOpenFileIgnoringExcludesParams(
+      new TextDocumentItem(fileUri, "py", 1, "def foo():\n  toto = 0\n"), null, null, Collections.emptyList()));
+
+    awaitUntilAsserted(() -> assertThat(client.getDiagnostics(fileUri))
+      .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage,
+        Diagnostic::getSeverity)
+      .containsExactlyInAnyOrder(
+        tuple(1, 2, 1, 6, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"toto\".", DiagnosticSeverity.Warning)));
+  }
+
+  @Test
+  void change_issue_status_permission_check_not_bound() throws ExecutionException, InterruptedException {
+    var response = lsProxy.checkIssueStatusChangePermitted(new SonarLintExtendedLanguageServer.CheckIssueStatusChangePermittedParams(temp.toUri().toString(), "key")).get();
+
+    awaitUntilAsserted(() -> {
+      assertFalse(response.isPermitted());
+      assertThat(response.getNotPermittedReason()).isEqualTo("There is no binding for the folder: " + temp.toUri());
+      assertThat(response.getAllowedStatuses()).isEmpty();
+    });
   }
 
   @Override

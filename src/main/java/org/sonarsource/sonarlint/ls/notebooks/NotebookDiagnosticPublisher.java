@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -34,7 +34,6 @@ import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageClient;
 
 import static java.util.stream.Collectors.groupingBy;
 import static org.sonarsource.sonarlint.ls.DiagnosticPublisher.prepareDiagnostic;
-import static org.sonarsource.sonarlint.ls.util.Utils.severity;
 
 public class NotebookDiagnosticPublisher {
   private final SonarLintExtendedLanguageClient client;
@@ -54,9 +53,7 @@ public class NotebookDiagnosticPublisher {
 
   static Diagnostic convertCellIssue(Map.Entry<String, DelegatingCellIssue> entry) {
     var issue = entry.getValue();
-    var severity = severity(issue.getSeverity());
-
-    return prepareDiagnostic(severity, issue, entry.getKey(), true);
+    return prepareDiagnostic(issue, entry.getKey(), true, false);
   }
 
   public void publishNotebookDiagnostics(URI uri, VersionedOpenNotebook versionedOpenNotebook) {
@@ -66,14 +63,14 @@ public class NotebookDiagnosticPublisher {
 
     var localDiagnostics = localIssues.entrySet()
       .stream()
-      .map(entry -> Map.entry(entry.getKey(), versionedOpenNotebook.toCellIssue(entry.getValue().getIssue())))
+      .map(entry -> Map.entry(entry.getKey(), versionedOpenNotebook.toCellIssue(entry.getValue().issue())))
       .map(NotebookDiagnosticPublisher::convertCellIssue)
       .collect(groupingBy(diagnostic -> {
         var localIssue = localIssues.get(((DiagnosticPublisher.DiagnosticData) diagnostic.getData()).getEntryKey());
         var cellUri = URI.create("");
-        if (localIssue != null && localIssue.getIssue() != null && localIssue.getIssue().getStartLine() != null) {
+        if (localIssue != null && localIssue.issue() != null && localIssue.issue().getStartLine() != null) {
           // Better to not publish any diagnostics than to publish for wrong location
-          cellUri = versionedOpenNotebook.getCellUri(localIssue.getIssue().getStartLine()).orElse(URI.create(""));
+          cellUri = versionedOpenNotebook.getCellUri(localIssue.issue().getStartLine()).orElse(URI.create(""));
         }
 
         var cellsWithIssues = notebookCellsWithIssues.get(uri);
@@ -101,11 +98,21 @@ public class NotebookDiagnosticPublisher {
     client.publishDiagnostics(p);
   }
 
-  public void cleanupDiagnostics(URI notebookUri) {
+  public void cleanupDiagnosticsForCellsWithoutIssues(URI notebookUri) {
     var versionedOpenNotebook = openNotebooksCache.getFile(notebookUri);
     var cellsWithIssues = notebookCellsWithIssues.getOrDefault(notebookUri, List.of());
     versionedOpenNotebook.ifPresent(notebook -> notebook.getCellUris().forEach(cellUri -> {
       if (cellsWithIssues != null && !cellsWithIssues.contains(URI.create(cellUri))) {
+        removeCellDiagnostics(URI.create(cellUri));
+      }
+    }));
+  }
+
+  public void removeAllExistingDiagnosticsForNotebook(URI notebookUri) {
+    var versionedOpenNotebook = openNotebooksCache.getFile(notebookUri);
+    var cellsWithIssues = notebookCellsWithIssues.getOrDefault(notebookUri, List.of());
+    versionedOpenNotebook.ifPresent(notebook -> notebook.getCellUris().forEach(cellUri -> {
+      if (cellsWithIssues != null && cellsWithIssues.contains(URI.create(cellUri))) {
         removeCellDiagnostics(URI.create(cellUri));
       }
     }));

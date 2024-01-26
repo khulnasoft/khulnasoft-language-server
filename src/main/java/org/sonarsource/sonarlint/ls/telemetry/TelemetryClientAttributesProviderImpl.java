@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -31,23 +31,20 @@ import org.sonarsource.sonarlint.ls.NodeJsRuntime;
 import org.sonarsource.sonarlint.ls.backend.BackendServiceFacade;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingManager;
 import org.sonarsource.sonarlint.ls.settings.SettingsManager;
-import org.sonarsource.sonarlint.ls.standalone.StandaloneEngineManager;
 
 public class TelemetryClientAttributesProviderImpl implements TelemetryClientAttributesProvider {
 
   private final SettingsManager settingsManager;
   private final ProjectBindingManager bindingManager;
   private final NodeJsRuntime nodeJsRuntime;
-  private final StandaloneEngineManager standaloneEngineManager;
   private final Map<String, Object> additionalAttributes;
   private final BackendServiceFacade backendServiceFacade;
 
   public TelemetryClientAttributesProviderImpl(SettingsManager settingsManager, ProjectBindingManager bindingManager, NodeJsRuntime nodeJsRuntime,
-    StandaloneEngineManager standaloneEngineManager, Map<String, Object> additionalAttributes, BackendServiceFacade backendServiceFacade) {
+    Map<String, Object> additionalAttributes, BackendServiceFacade backendServiceFacade) {
     this.settingsManager = settingsManager;
     this.bindingManager = bindingManager;
     this.nodeJsRuntime = nodeJsRuntime;
-    this.standaloneEngineManager = standaloneEngineManager;
     this.additionalAttributes = additionalAttributes;
     this.backendServiceFacade = backendServiceFacade;
   }
@@ -83,7 +80,7 @@ public class TelemetryClientAttributesProviderImpl implements TelemetryClientAtt
   }
 
   private Set<String> getDefaultEnabledRules() {
-    return backendServiceFacade.listAllStandaloneRulesDefinitions().thenApply(response ->
+    return backendServiceFacade.getBackendService().listAllStandaloneRulesDefinitions().thenApply(response ->
         response.getRulesByKey()
           .values()
           .stream()

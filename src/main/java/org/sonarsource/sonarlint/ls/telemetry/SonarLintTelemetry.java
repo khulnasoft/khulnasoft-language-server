@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -31,7 +31,6 @@ import java.util.function.Supplier;
 import javax.annotation.CheckForNull;
 import javax.annotation.Nullable;
 import org.sonarsource.sonarlint.core.commons.Language;
-import org.sonarsource.sonarlint.core.commons.log.SonarLintLogger;
 import org.sonarsource.sonarlint.core.telemetry.InternalDebug;
 import org.sonarsource.sonarlint.core.telemetry.TelemetryHttpClient;
 import org.sonarsource.sonarlint.core.telemetry.TelemetryManager;
@@ -39,59 +38,54 @@ import org.sonarsource.sonarlint.core.telemetry.TelemetryPathManager;
 import org.sonarsource.sonarlint.ls.NodeJsRuntime;
 import org.sonarsource.sonarlint.ls.backend.BackendServiceFacade;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingManager;
-import org.sonarsource.sonarlint.ls.http.ApacheHttpClientProvider;
+import org.sonarsource.sonarlint.ls.log.LanguageClientLogOutput;
 import org.sonarsource.sonarlint.ls.settings.SettingsManager;
 import org.sonarsource.sonarlint.ls.settings.WorkspaceSettings;
 import org.sonarsource.sonarlint.ls.settings.WorkspaceSettingsChangeListener;
-import org.sonarsource.sonarlint.ls.standalone.StandaloneEngineManager;
 import org.sonarsource.sonarlint.ls.util.Utils;
 
 public class SonarLintTelemetry implements WorkspaceSettingsChangeListener {
   public static final String DISABLE_PROPERTY_KEY = "sonarlint.telemetry.disabled";
-  private static final SonarLintLogger LOG = SonarLintLogger.get();
 
   private final Supplier<ScheduledExecutorService> executorFactory;
-  private final ApacheHttpClientProvider httpClientProvider;
   private final SettingsManager settingsManager;
   private final ProjectBindingManager bindingManager;
   private final NodeJsRuntime nodeJsRuntime;
-  private final StandaloneEngineManager standaloneEngineManager;
-
   private TelemetryManager telemetry;
 
   ScheduledFuture<?> scheduledFuture;
   private ScheduledExecutorService scheduler;
   private Map<String, Object> additionalAttributes;
   private final BackendServiceFacade backendServiceFacade;
+  private final LanguageClientLogOutput logOutput;
 
-  public SonarLintTelemetry(ApacheHttpClientProvider httpClientProvider, SettingsManager settingsManager, ProjectBindingManager bindingManager, NodeJsRuntime nodeJsRuntime,
-    StandaloneEngineManager standaloneEngineManager, BackendServiceFacade backendServiceFacade) {
-    this(() -> Executors.newScheduledThreadPool(1, Utils.threadFactory("SonarLint Telemetry", false)), httpClientProvider, settingsManager, bindingManager, nodeJsRuntime,
-      standaloneEngineManager, backendServiceFacade);
+  public SonarLintTelemetry(SettingsManager settingsManager, ProjectBindingManager bindingManager, NodeJsRuntime nodeJsRuntime,
+    BackendServiceFacade backendServiceFacade, LanguageClientLogOutput logOutput) {
+    this(() -> Executors.newScheduledThreadPool(1, Utils.threadFactory("SonarLint Telemetry", false)), settingsManager, bindingManager, nodeJsRuntime,
+      backendServiceFacade, logOutput);
   }
 
-  public SonarLintTelemetry(Supplier<ScheduledExecutorService> executorFactory, ApacheHttpClientProvider httpClientProvider, SettingsManager settingsManager,
+  public SonarLintTelemetry(Supplier<ScheduledExecutorService> executorFactory, SettingsManager settingsManager,
     ProjectBindingManager bindingManager,
-    NodeJsRuntime nodeJsRuntime, StandaloneEngineManager standaloneEngineManager, BackendServiceFacade backendServiceFacade) {
+    NodeJsRuntime nodeJsRuntime, BackendServiceFacade backendServiceFacade, LanguageClientLogOutput logOutput) {
     this.executorFactory = executorFactory;
-    this.httpClientProvider = httpClientProvider;
     this.settingsManager = settingsManager;
     this.bindingManager = bindingManager;
     this.nodeJsRuntime = nodeJsRuntime;
-    this.standaloneEngineManager = standaloneEngineManager;
     this.backendServiceFacade = backendServiceFacade;
+    this.logOutput = logOutput;
   }
 
   private void optOut(boolean optOut) {
     if (telemetry != null) {
       if (optOut) {
         if (telemetry.isEnabled()) {
-          LOG.debug("Disabling telemetry");
+          logOutput.debug("Disabling telemetry");
           telemetry.disable();
         }
       } else {
         if (!telemetry.isEnabled()) {
-          LOG.debug("Enabling telemetry");
+          logOutput.debug("Enabling telemetry");
           telemetry.enable();
         }
       }
@@ -102,10 +96,14 @@ public class SonarLintTelemetry implements WorkspaceSettingsChangeListener {
     return telemetry != null && telemetry.isEnabled();
   }
 
-  public void initialize(@Nullable String productKey, @Nullable String telemetryStorage, String productName, String productVersion, String ideVersion,
-    String platform, String architecture, Map<String, Object> additionalAttributes) {
-    var storagePath = getStoragePath(productKey, telemetryStorage);
-    init(storagePath, productName, productVersion, ideVersion, platform, architecture, additionalAttributes);
+  public void initialize(TelemetryInitParams telemetryInitParams) {
+    var storagePath = getStoragePath(telemetryInitParams.getProductKey(), telemetryInitParams.getTelemetryStorage());
+    init(storagePath, telemetryInitParams.getProductName(),
+      telemetryInitParams.getProductVersion(),
+      telemetryInitParams.getIdeVersion(),
+      telemetryInitParams.getPlatform(),
+      telemetryInitParams.getArchitecture(),
+      telemetryInitParams.getAdditionalAttributes());
   }
 
   // Visible for testing
@@ -113,14 +111,16 @@ public class SonarLintTelemetry implements WorkspaceSettingsChangeListener {
     String platform, String architecture, Map<String, Object> additionalAttributes) {
     this.additionalAttributes = additionalAttributes;
     if (storagePath == null) {
-      LOG.debug("Telemetry disabled because storage path is null");
+      logOutput.debug("Telemetry disabled because storage path is null");
       return;
     }
     if ("true".equals(System.getProperty(DISABLE_PROPERTY_KEY))) {
-      LOG.debug("Telemetry disabled by system property");
+      logOutput.debug("Telemetry disabled by system property");
       return;
     }
-    var client = new TelemetryHttpClient(productName, productVersion, ideVersion, platform, architecture, httpClientProvider.anonymous());
+
+    var client = new TelemetryHttpClient(productName, productVersion, ideVersion, platform, architecture,
+      backendServiceFacade.getBackendService().getHttpClientNoAuth());
     this.telemetry = newTelemetryManager(storagePath, client);
     try {
       this.scheduler = executorFactory.get();
@@ -128,7 +128,7 @@ public class SonarLintTelemetry implements WorkspaceSettingsChangeListener {
         1, TimeUnit.HOURS.toMinutes(6), TimeUnit.MINUTES);
     } catch (Exception e) {
       if (InternalDebug.isEnabled()) {
-        LOG.error("Failed scheduling period telemetry job", e);
+        logOutput.error("Failed scheduling period telemetry job", e);
       }
     }
   }
@@ -145,7 +145,7 @@ public class SonarLintTelemetry implements WorkspaceSettingsChangeListener {
 
   TelemetryManager newTelemetryManager(Path path, TelemetryHttpClient client) {
     return new TelemetryManager(path, client,
-      new TelemetryClientAttributesProviderImpl(settingsManager, bindingManager, nodeJsRuntime, standaloneEngineManager, additionalAttributes, backendServiceFacade));
+      new TelemetryClientAttributesProviderImpl(settingsManager, bindingManager, nodeJsRuntime, additionalAttributes, backendServiceFacade));
   }
 
   void upload() {

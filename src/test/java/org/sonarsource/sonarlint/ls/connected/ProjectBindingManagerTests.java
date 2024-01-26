@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -24,6 +24,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -34,6 +35,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
+import org.eclipse.lsp4j.MessageType;
 import org.eclipse.lsp4j.WorkspaceFolder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -41,20 +43,22 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 import org.sonarsource.sonarlint.core.client.api.connected.ConnectedSonarLintEngine;
 import org.sonarsource.sonarlint.core.client.api.connected.ProjectBranches;
+import org.sonarsource.sonarlint.core.commons.IssueSeverity;
+import org.sonarsource.sonarlint.core.commons.RuleType;
+import org.sonarsource.sonarlint.core.commons.TextRangeWithHash;
 import org.sonarsource.sonarlint.core.commons.log.ClientLogOutput;
 import org.sonarsource.sonarlint.core.serverapi.component.ServerProject;
 import org.sonarsource.sonarlint.core.serverconnection.DownloadException;
 import org.sonarsource.sonarlint.core.serverconnection.ProjectBinding;
+import org.sonarsource.sonarlint.core.serverconnection.issues.ServerTaintIssue;
 import org.sonarsource.sonarlint.ls.AnalysisScheduler;
 import org.sonarsource.sonarlint.ls.DiagnosticPublisher;
 import org.sonarsource.sonarlint.ls.EnginesFactory;
 import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageClient;
 import org.sonarsource.sonarlint.ls.backend.BackendService;
 import org.sonarsource.sonarlint.ls.backend.BackendServiceFacade;
-import org.sonarsource.sonarlint.ls.connected.events.ServerSentEventsHandlerService;
 import org.sonarsource.sonarlint.ls.folders.WorkspaceFolderWrapper;
 import org.sonarsource.sonarlint.ls.folders.WorkspaceFoldersManager;
-import org.sonarsource.sonarlint.ls.http.ApacheHttpClientProvider;
 import org.sonarsource.sonarlint.ls.notebooks.OpenNotebooksCache;
 import org.sonarsource.sonarlint.ls.notebooks.VersionedOpenNotebook;
 import org.sonarsource.sonarlint.ls.settings.ServerConnectionSettings;
@@ -70,7 +74,6 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -90,10 +93,9 @@ class ProjectBindingManagerTests {
   private static final ProjectBinding FAKE_BINDING2 = new ProjectBinding(PROJECT_KEY2, "sqPrefix2", "idePrefix2");
   private static final String CONNECTION_ID = "myServer";
   private static final String SERVER_ID2 = "myServer2";
-  private static final ApacheHttpClientProvider httpClientProvider = mock(ApacheHttpClientProvider.class);
-  private static final ServerConnectionSettings GLOBAL_SETTINGS = new ServerConnectionSettings(CONNECTION_ID, "http://foo", "token", null, true, httpClientProvider);
-  private static final ServerConnectionSettings GLOBAL_SETTINGS_DIFFERENT_SERVER_ID = new ServerConnectionSettings(SERVER_ID2, "http://foo2", "token2", null, true,
-    httpClientProvider);
+  private static BackendServiceFacade backendServiceFacade = mock(BackendServiceFacade.class);
+  private static final ServerConnectionSettings GLOBAL_SETTINGS = new ServerConnectionSettings(CONNECTION_ID, "http://foo", "token", null, true);
+  private static final ServerConnectionSettings GLOBAL_SETTINGS_DIFFERENT_SERVER_ID = new ServerConnectionSettings(SERVER_ID2, "http://foo2", "token2", null, true);
   private static final WorkspaceFolderSettings UNBOUND_SETTINGS = new WorkspaceFolderSettings(null, null, Collections.emptyMap(), null, null);
   private static final WorkspaceFolderSettings BOUND_SETTINGS = new WorkspaceFolderSettings(CONNECTION_ID, PROJECT_KEY, Collections.emptyMap(), null, null);
   private static final WorkspaceFolderSettings BOUND_SETTINGS2 = new WorkspaceFolderSettings(SERVER_ID2, PROJECT_KEY2, Collections.emptyMap(), null, null);
@@ -102,7 +104,6 @@ class ProjectBindingManagerTests {
   private static final String BRANCH_NAME = "main";
   @RegisterExtension
   SonarLintLogTester logTester = new SonarLintLogTester();
-
   @TempDir
   Path basedir;
   private Path workspaceFolderPath;
@@ -112,6 +113,7 @@ class ProjectBindingManagerTests {
   private Path fileInAWorkspaceFolderPath2;
   private Path fileNotInAWorkspaceFolderPath;
   ConcurrentMap<URI, Optional<ProjectBindingWrapper>> folderBindingCache;
+  ConcurrentMap<String, Optional<ConnectedSonarLintEngine>> connectedEngineCacheByConnectionId;
   private ProjectBindingManager underTest;
   private final SettingsManager settingsManager = mock(SettingsManager.class);
   private final WorkspaceFoldersManager foldersManager = mock(WorkspaceFoldersManager.class);
@@ -122,8 +124,6 @@ class ProjectBindingManagerTests {
   private final AnalysisScheduler analysisManager = mock(AnalysisScheduler.class);
   SonarLintExtendedLanguageClient client = mock(SonarLintExtendedLanguageClient.class);
   private final DiagnosticPublisher diagnosticPublisher = mock(DiagnosticPublisher.class);
-  private final ServerSentEventsHandlerService serverSentEventsHandlerService = mock(ServerSentEventsHandlerService.class);
-  private final BackendServiceFacade backendServiceFacade = mock(BackendServiceFacade.class);
   private final OpenNotebooksCache openNotebooksCache = mock(OpenNotebooksCache.class);
 
   @BeforeEach
@@ -152,19 +152,19 @@ class ProjectBindingManagerTests {
     when(client.getTokenForServer(any())).thenReturn(CompletableFuture.supplyAsync(() -> "token"));
 
     folderBindingCache = new ConcurrentHashMap<>();
+    connectedEngineCacheByConnectionId = new ConcurrentHashMap<>();
     TaintVulnerabilitiesCache taintVulnerabilitiesCache = new TaintVulnerabilitiesCache();
 
     when(openNotebooksCache.getFile(any(URI.class))).thenReturn(Optional.empty());
 
-    underTest = new ProjectBindingManager(enginesFactory, foldersManager, settingsManager, client, folderBindingCache, null,
-      taintVulnerabilitiesCache, diagnosticPublisher, backendServiceFacade, openNotebooksCache);
+    underTest = new ProjectBindingManager(enginesFactory, foldersManager, settingsManager, client, folderBindingCache, logTester.getLogger(),
+      connectedEngineCacheByConnectionId, taintVulnerabilitiesCache, diagnosticPublisher, backendServiceFacade, openNotebooksCache);
     underTest.setAnalysisManager(analysisManager);
-    underTest.setServerSentEventsHandler(serverSentEventsHandlerService);
     underTest.setBranchResolver(uri -> Optional.of("main"));
   }
 
   private static WorkspaceSettings newWorkspaceSettingsWithServers(Map<String, ServerConnectionSettings> servers) {
-    return new WorkspaceSettings(false, servers, Collections.emptyList(), Collections.emptyList(), Collections.emptyMap(), false, false, "");
+    return new WorkspaceSettings(false, servers, Collections.emptyList(), Collections.emptyList(), Collections.emptyMap(), false, false, "", false);
   }
 
   @Test
@@ -211,8 +211,9 @@ class ProjectBindingManagerTests {
 
     assertThat(underTest.getBinding(fileInAWorkspaceFolderPath.toUri())).isEmpty();
 
-    assertThat(logTester.logs(ClientLogOutput.Level.ERROR))
-      .containsOnly("The specified connection id 'myServer' doesn't exist.", "Invalid binding for '" + workspaceFolderPath.toString() + "'");
+    assertThat(logTester.logs(MessageType.Log))
+      .anyMatch(log -> log.contains("The specified connection id 'myServer' doesn't exist."))
+      .anyMatch(log -> log.contains("Invalid binding for '" + workspaceFolderPath.toString() + "'"));;
     assertThat(underTest.usesConnectedMode()).isFalse();
     assertThat(underTest.usesSonarCloud()).isFalse();
   }
@@ -225,7 +226,7 @@ class ProjectBindingManagerTests {
 
     assertThat(underTest.getBinding(fileInAWorkspaceFolderPath.toUri())).isEmpty();
 
-    assertThat(logTester.logs(ClientLogOutput.Level.ERROR)).contains("Error starting connected SonarLint engine for '" + CONNECTION_ID + "'");
+    assertThat(logTester.logs(MessageType.Log)).anyMatch(log -> log.contains("Error starting connected SonarLint engine for '" + CONNECTION_ID + "'"));
   }
 
   @Test
@@ -263,7 +264,7 @@ class ProjectBindingManagerTests {
     when(settingsManager.getCurrentDefaultFolderSettings()).thenReturn(new WorkspaceFolderSettings("sonarcloud", PROJECT_KEY, Collections.emptyMap(), null, null));
 
     mockFileInABoundWorkspaceFolder();
-    servers.put("sonarcloud", new ServerConnectionSettings("sonarcloud", "https://sonarcloud.io", "token", null, true, httpClientProvider));
+    servers.put("sonarcloud", new ServerConnectionSettings("sonarcloud", "https://sonarcloud.io", "token", null, true));
 
     when(fakeEngine.calculatePathPrefixes(eq(PROJECT_KEY), any())).thenReturn(FAKE_BINDING);
 
@@ -330,7 +331,7 @@ class ProjectBindingManagerTests {
 
     assertThat(binding).isEmpty();
     verify(fakeEngine).stop(false);
-    assertThat(logTester.logs()).contains("Workspace 'WorkspaceFolder[name=<null>,uri=" + workspaceFolderPath.toUri() + "]' unbound");
+    assertThat(logTester.logs()).anyMatch(log -> log.contains("Workspace 'WorkspaceFolder[name=<null>,uri=" + workspaceFolderPath.toUri() + "]' unbound"));
   }
 
   @Test
@@ -352,7 +353,7 @@ class ProjectBindingManagerTests {
 
     assertThat(binding).isEmpty();
     verify(fakeEngine).stop(false);
-    assertThat(logTester.logs()).contains("All files outside workspace are now unbound");
+    assertThat(logTester.logs()).anyMatch(log -> log.contains("All files outside workspace are now unbound"));
   }
 
   @Test
@@ -376,7 +377,7 @@ class ProjectBindingManagerTests {
     verify(fakeEngine, never()).stop(anyBoolean());
     verify(fakeEngine).calculatePathPrefixes(eq(PROJECT_KEY2), any());
     assertThat(logTester.logs())
-      .contains("Resolved binding ProjectBinding[idePathPrefix=idePrefix2,projectKey=myProject2,serverPathPrefix=sqPrefix2] for folder " + workspaceFolderPath.toString());
+      .anyMatch(log -> log.contains("Resolved binding ProjectBinding[idePathPrefix=idePrefix2,projectKey=myProject2,serverPathPrefix=sqPrefix2] for folder " + workspaceFolderPath.toString()));
   }
 
   @Test
@@ -407,7 +408,8 @@ class ProjectBindingManagerTests {
 
     verify(fakeEngine).stop(anyBoolean());
     assertThat(logTester.logs())
-      .contains("The specified connection id 'myServer' doesn't exist.", "Invalid binding for '" + workspaceFolderPath.toString() + "'");
+      .anyMatch(log -> log.contains("The specified connection id 'myServer' doesn't exist.")
+        || log.contains("Invalid binding for '" + workspaceFolderPath.toString() + "'"));
   }
 
   @Test
@@ -433,7 +435,7 @@ class ProjectBindingManagerTests {
     verify(fakeEngine, never()).stop(anyBoolean());
     verify(fakeEngine).calculatePathPrefixes(eq(PROJECT_KEY2), any());
     assertThat(logTester.logs())
-      .contains("Resolved binding ProjectBinding[idePathPrefix=idePrefix2,projectKey=myProject2,serverPathPrefix=sqPrefix2] for folder " + anotherFolderPath.toString());
+      .anyMatch(log -> log.contains("Resolved binding ProjectBinding[idePathPrefix=idePrefix2,projectKey=myProject2,serverPathPrefix=sqPrefix2] for folder " + anotherFolderPath.toString()));
   }
 
   @Test
@@ -460,7 +462,7 @@ class ProjectBindingManagerTests {
     verify(fakeEngine).stop(false);
     verify(fakeEngine2).calculatePathPrefixes(eq(PROJECT_KEY), any());
     assertThat(logTester.logs())
-      .contains("Resolved binding ProjectBinding[idePathPrefix=idePrefix2,projectKey=myProject2,serverPathPrefix=sqPrefix2] for folder " + workspaceFolderPath.toString());
+      .anyMatch(log -> log.contains("Resolved binding ProjectBinding[idePathPrefix=idePrefix2,projectKey=myProject2,serverPathPrefix=sqPrefix2] for folder " + workspaceFolderPath.toString()));
   }
 
   @Test
@@ -482,13 +484,13 @@ class ProjectBindingManagerTests {
     assertThat(binding).isNotEmpty();
 
     assertThat(logTester.logs())
-      .contains("Starting connected SonarLint engine for 'myServer'...");
+      .anyMatch(log -> log.contains("Starting connected SonarLint engine for 'myServer'..."));
 
     var binding2 = underTest.getBinding(fileInAWorkspaceFolderPath2.toUri());
     assertThat(binding2).isNotEmpty();
 
     assertThat(logTester.logs())
-      .contains("Starting connected SonarLint engine for 'myServer2'...");
+      .anyMatch(log -> log.contains("Starting connected SonarLint engine for 'myServer2'..."));
 
     verify(enginesFactory).createConnectedEngine(eq("myServer"), any(ServerConnectionSettings.class));
     verify(enginesFactory).createConnectedEngine(eq("myServer2"), any(ServerConnectionSettings.class));
@@ -519,8 +521,9 @@ class ProjectBindingManagerTests {
 
     underTest.shutdown();
 
-    assertThat(logTester.logs(ClientLogOutput.Level.ERROR))
-      .contains("Unable to stop engine 'myServer'", "Unable to stop engine 'myServer2'");
+    assertThat(logTester.logs(MessageType.Log))
+      .anyMatch(log -> log.contains("Unable to stop engine 'myServer'"))
+      .anyMatch(log -> log.contains("Unable to stop engine 'myServer2'"));
 
     verify(fakeEngine).stop(false);
     verify(fakeEngine2).stop(false);
@@ -538,18 +541,6 @@ class ProjectBindingManagerTests {
 
     verify(fakeEngine).updateProject(any(), any(), eq(PROJECT_KEY), any());
     verify(fakeEngine).sync(any(), any(), eq(Set.of(PROJECT_KEY)), any());
-  }
-
-  @Test
-  void should_get_server_settings_for_unknown_url() {
-    assertThat(underTest.getServerConnectionSettingsForUrl("https://unknown.url")).isEmpty();
-  }
-
-  @Test
-  void should_get_server_settings_for_known_url() {
-    mockFileInABoundWorkspaceFolder();
-    assertThat(underTest.getServerConnectionSettingsForUrl(GLOBAL_SETTINGS.getServerUrl() + "/"))
-      .hasValueSatisfying(s -> assertThat(s.getEndpointParams().getBaseUrl()).isEqualTo(GLOBAL_SETTINGS.getServerUrl()));
   }
 
   @Test
@@ -574,28 +565,6 @@ class ProjectBindingManagerTests {
     assertThat(uri.get().toString())
       .startsWith("file:///")
       .contains("src/test/resources/sample-folder/Test.java");
-  }
-
-  @Test
-  void should_subscribe_for_server_events_when_starting_engine() {
-    var folder = mockFileInABoundWorkspaceFolder();
-    when(foldersManager.getAll()).thenReturn(List.of(folder));
-
-    underTest.getBinding(fileInAWorkspaceFolderPath.toUri());
-
-    verify(fakeEngine).subscribeForEvents(any(), isNull(), eq(Set.of(PROJECT_KEY)), any(), isNull());
-  }
-
-  @Test
-  void should_subscribe_for_server_events_when_folders_change() {
-    var folder = mockFileInABoundWorkspaceFolder();
-    // create engine
-    underTest.getBinding(fileInAWorkspaceFolderPath.toUri());
-    when(foldersManager.getAll()).thenReturn(List.of(folder));
-
-    underTest.subscribeForServerEvents(List.of(folder), List.of());
-
-    verify(fakeEngine).subscribeForEvents(any(), isNull(), eq(Set.of(PROJECT_KEY)), any(), isNull());
   }
 
   @Test
@@ -645,13 +614,6 @@ class ProjectBindingManagerTests {
   }
 
   @Test
-  void should_not_subscribe_for_server_events_if_no_config() {
-    underTest.subscribeForServerEvents(CONNECTION_ID);
-
-    verify(fakeEngine, times(0)).subscribeForEvents(any(), isNull(), eq(Set.of(PROJECT_KEY)), any(), isNull());
-  }
-
-  @Test
   void should_get_no_project_for_unknown_connection() {
     assertThatThrownBy(() -> underTest.getRemoteProjects("unknown"))
       .isInstanceOf(IllegalArgumentException.class)
@@ -665,6 +627,36 @@ class ProjectBindingManagerTests {
     assertThatThrownBy(() -> underTest.getRemoteProjects(CONNECTION_ID))
       .isInstanceOf(IllegalStateException.class)
       .hasMessage("Failed to fetch list of projects from '" + CONNECTION_ID + "'");
+  }
+
+  @Test
+  void should_update_taint_issue_cache_from_storage() {
+    var serverPath = fileInAWorkspaceFolderPath.toUri().toString();
+    var fileUri = fileInAWorkspaceFolderPath.toUri();
+    var folderUri = workspaceFolderPath.toUri();
+    var projectBindingWrapperMock = mock(ProjectBindingWrapper.class);
+    var projectBinding = mock(ProjectBinding.class);
+    var connectedEngine = mock(ConnectedSonarLintEngine.class);
+    when(projectBindingWrapperMock.getBinding()).thenReturn(projectBinding);
+    when(projectBindingWrapperMock.getConnectionId()).thenReturn("connectionId");
+    when(projectBindingWrapperMock.getEngine()).thenReturn(connectedEngine);
+
+    when(connectedEngine.getServerBranches(any())).thenReturn(new ProjectBranches(Set.of("main", "feature"), "main"));
+    when(connectedEngine.getAllServerTaintIssues(any(), any())).thenReturn(List.of(
+      new ServerTaintIssue("taint1", false, "ruleKey1",
+        "message", fileUri.getRawPath(), Instant.now(), IssueSeverity.CRITICAL, RuleType.VULNERABILITY,
+        new TextRangeWithHash(1, 1, 1, 1, ""),
+        null, null, null)));
+
+    when((projectBinding.serverPathToIdePath(fileUri.getRawPath()))).thenReturn(Optional.of(FILE_PHP));
+    folderBindingCache.put(folderUri, Optional.of(projectBindingWrapperMock));
+    connectedEngineCacheByConnectionId.put("connectionId", Optional.of(connectedEngine));
+    var workspaceFolderWrapper = new WorkspaceFolderWrapper(folderUri, new WorkspaceFolder(folderUri.toString(), "sample-folder"), logTester.getLogger());
+    when(foldersManager.findFolderForFile(fileUri)).thenReturn(Optional.of(workspaceFolderWrapper));
+
+    underTest.getBindingAndRepublishTaints(fileUri);
+
+    verify(diagnosticPublisher).publishDiagnostics(URI.create(serverPath), false);
   }
 
   private WorkspaceFolderWrapper mockFileInABoundWorkspaceFolder() {
@@ -688,13 +680,13 @@ class ProjectBindingManagerTests {
   }
 
   private WorkspaceFolderWrapper mockFileInAFolder() {
-    var folderWrapper = spy(new WorkspaceFolderWrapper(workspaceFolderPath.toUri(), new WorkspaceFolder(workspaceFolderPath.toUri().toString())));
+    var folderWrapper = spy(new WorkspaceFolderWrapper(workspaceFolderPath.toUri(), new WorkspaceFolder(workspaceFolderPath.toUri().toString()), logTester.getLogger()));
     when(foldersManager.findFolderForFile(fileInAWorkspaceFolderPath.toUri())).thenReturn(Optional.of(folderWrapper));
     return folderWrapper;
   }
 
   private WorkspaceFolderWrapper mockFileInAFolder2() {
-    var folderWrapper2 = spy(new WorkspaceFolderWrapper(workspaceFolderPath2.toUri(), new WorkspaceFolder(workspaceFolderPath2.toUri().toString())));
+    var folderWrapper2 = spy(new WorkspaceFolderWrapper(workspaceFolderPath2.toUri(), new WorkspaceFolder(workspaceFolderPath2.toUri().toString()), logTester.getLogger()));
     when(foldersManager.findFolderForFile(fileInAWorkspaceFolderPath2.toUri())).thenReturn(Optional.of(folderWrapper2));
     return folderWrapper2;
   }

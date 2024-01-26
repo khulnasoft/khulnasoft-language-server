@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -44,9 +44,7 @@ import static java.net.URI.create;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.sonarsource.sonarlint.ls.folders.WorkspaceFoldersManager.isAncestor;
 
@@ -58,7 +56,7 @@ class WorkspaceFoldersManagerTests {
   BackendServiceFacade backendServiceFacade = mock(BackendServiceFacade.class);
   BackendService backendService = mock(BackendService.class);
 
-  private final WorkspaceFoldersManager underTest = new WorkspaceFoldersManager(new ImmediateExecutorService(), backendServiceFacade);
+  private final WorkspaceFoldersManager underTest = new WorkspaceFoldersManager(new ImmediateExecutorService(), backendServiceFacade, logTester.getLogger());
 
   @BeforeEach
   void prepare() {
@@ -171,8 +169,9 @@ class WorkspaceFoldersManagerTests {
     underTest.didChangeWorkspaceFolders(new WorkspaceFoldersChangeEvent(List.of(workspaceFolder), Collections.emptyList()));
 
     assertThat(underTest.getAll()).extracting(WorkspaceFolderWrapper::getRootPath).containsExactly(basedir);
-    assertThat(logTester.logs()).containsExactly("Processing didChangeWorkspaceFolders event",
-      "Folder WorkspaceFolder[name=<null>,uri=" + basedir.toUri() + "] added");
+    assertThat(logTester.logs())
+      .anyMatch(log -> log.contains("Processing didChangeWorkspaceFolders event"))
+      .anyMatch(log -> log.contains("Folder WorkspaceFolder[name=<null>,uri=" + basedir.toUri() + "] added"));
 
     logTester.clear();
 
@@ -180,8 +179,9 @@ class WorkspaceFoldersManagerTests {
     underTest.didChangeWorkspaceFolders(new WorkspaceFoldersChangeEvent(List.of(workspaceFolder), Collections.emptyList()));
 
     assertThat(underTest.getAll()).extracting(WorkspaceFolderWrapper::getRootPath).containsExactly(basedir);
-    assertThat(logTester.logs()).containsExactly("Processing didChangeWorkspaceFolders event",
-      "Registered workspace folder WorkspaceFolder[name=<null>,uri=" + basedir.toUri() + "] was already added");
+    assertThat(logTester.logs())
+      .anyMatch(log -> log.contains("Processing didChangeWorkspaceFolders event"))
+      .anyMatch(log -> log.contains("Registered workspace folder WorkspaceFolder[name=<null>,uri=" + basedir.toUri() + "] was already added"));
   }
 
   @Test
@@ -197,32 +197,19 @@ class WorkspaceFoldersManagerTests {
     underTest.didChangeWorkspaceFolders(new WorkspaceFoldersChangeEvent(Collections.emptyList(), List.of(workspaceFolder)));
 
     assertThat(underTest.getAll()).isEmpty();
-    assertThat(logTester.logs()).containsExactly("Processing didChangeWorkspaceFolders event",
-      "Folder WorkspaceFolder[name=<null>,uri=" + basedir.toUri() + "] removed");
+    assertThat(logTester.logs())
+      .anyMatch(log -> log.contains("Processing didChangeWorkspaceFolders event"))
+      .anyMatch(log -> log.contains("Folder WorkspaceFolder[name=<null>,uri=" + basedir.toUri() + "] removed"));
 
     logTester.clear();
 
-    // Should never occurs
+    // Should never occur
     underTest.didChangeWorkspaceFolders(new WorkspaceFoldersChangeEvent(Collections.emptyList(), List.of(workspaceFolder)));
 
     assertThat(underTest.getAll()).isEmpty();
-    assertThat(logTester.logs()).containsExactly("Processing didChangeWorkspaceFolders event",
-      "Unregistered workspace folder was missing: " + basedir.toUri());
-  }
-
-  @Test
-  void should_subscribe_for_server_events_when_adding_a_bound_folder() {
-    var addedUri = Paths.get("path/to/base/added").toAbsolutePath().toUri();
-    var addedWorkspaceFolder = mockWorkspaceFolder(addedUri);
-    var removedUri = Paths.get("path/to/base/removed").toAbsolutePath().toUri();
-    var removedWorkspaceFolder = mockWorkspaceFolder(removedUri);
-    underTest.didChangeWorkspaceFolders(new WorkspaceFoldersChangeEvent(List.of(removedWorkspaceFolder), List.of()));
-
-    underTest.didChangeWorkspaceFolders(new WorkspaceFoldersChangeEvent(List.of(addedWorkspaceFolder), List.of(removedWorkspaceFolder)));
-
-    verify(bindingManager).subscribeForServerEvents(
-      argThat(added -> added.size() == 1 && added.get(0).getUri().equals(addedUri)),
-      argThat(removed -> removed.size() == 1 && removed.get(0).getUri().equals(removedUri)));
+    assertThat(logTester.logs())
+      .anyMatch(log -> log.contains("Processing didChangeWorkspaceFolders event"))
+      .anyMatch(log -> log.contains("Unregistered workspace folder was missing: " + basedir.toUri()));
   }
 
   private static WorkspaceFolder mockWorkspaceFolder(URI uri) {

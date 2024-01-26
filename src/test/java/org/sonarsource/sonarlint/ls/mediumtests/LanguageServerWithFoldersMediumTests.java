@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -36,9 +36,11 @@ import org.eclipse.lsp4j.WorkspaceFoldersChangeEvent;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.groups.Tuple.tuple;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 class LanguageServerWithFoldersMediumTests extends AbstractLanguageServerMediumTests {
 
@@ -59,6 +61,20 @@ class LanguageServerWithFoldersMediumTests extends AbstractLanguageServerMediumT
   }
 
   @Override
+  protected void setupGlobalSettings(Map<String, Object> globalSettings) {
+    setShowVerboseLogs(client.globalSettings, true);
+  }
+
+  @Override
+  protected void verifyConfigurationChangeOnClient() {
+    try {
+      assertTrue(client.readyForTestsLatch.await(15, SECONDS));
+    } catch (InterruptedException e) {
+      fail(e);
+    }
+  }
+
+  @Override
   protected void setUpFolderSettings(Map<String, Map<String, Object>> folderSettings) {
     setTestFilePattern(getFolderSettings(folder1BaseDir.toUri().toString()), "**/*Test.py");
     setTestFilePattern(getFolderSettings(folder2BaseDir.toUri().toString()), "**/*Test.py");
@@ -66,7 +82,6 @@ class LanguageServerWithFoldersMediumTests extends AbstractLanguageServerMediumT
 
   @Test
   void analysisShouldUseFolderSettings() throws Exception {
-    setShowVerboseLogs(client.globalSettings, true);
     // In folder settings, the test pattern is **/*Test.py while in global config we put **/*.py
     setTestFilePattern(client.globalSettings, "**/*.py");
     notifyConfigurationChangeOnClient();
@@ -77,8 +92,8 @@ class LanguageServerWithFoldersMediumTests extends AbstractLanguageServerMediumT
     awaitUntilAsserted(() -> assertThat(client.getDiagnostics(uriInFolder))
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
       .containsExactly(
-        tuple(1, 2, 1, 6, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"toto\".", DiagnosticSeverity.Information),
-        tuple(2, 2, 2, 7, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"plouf\".", DiagnosticSeverity.Information)));
+        tuple(1, 2, 1, 6, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"toto\".", DiagnosticSeverity.Warning),
+        tuple(2, 2, 2, 7, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"plouf\".", DiagnosticSeverity.Warning)));
 
     client.logs.clear();
 
@@ -95,9 +110,6 @@ class LanguageServerWithFoldersMediumTests extends AbstractLanguageServerMediumT
 
   @Test
   void shouldBatchAnalysisFromTheSameFolder() {
-    setShowVerboseLogs(client.globalSettings, true);
-    notifyConfigurationChangeOnClient();
-
     var file1InFolder = folder1BaseDir.resolve("file1.py").toUri().toString();
     var file2InFolder = folder1BaseDir.resolve("file2.py").toUri().toString();
 
@@ -129,9 +141,6 @@ class LanguageServerWithFoldersMediumTests extends AbstractLanguageServerMediumT
 
   @Test
   void shouldNotBatchAnalysisFromDifferentFolders() throws Exception {
-    setShowVerboseLogs(client.globalSettings, true);
-    notifyConfigurationChangeOnClient();
-
     // Simulate opening of a second workspace folder
     lsProxy.getWorkspaceService().didChangeWorkspaceFolders(
       new DidChangeWorkspaceFoldersParams(new WorkspaceFoldersChangeEvent(List.of(new WorkspaceFolder(folder2BaseDir.toUri().toString(), "My Folder 2")), List.of())));
@@ -160,8 +169,8 @@ class LanguageServerWithFoldersMediumTests extends AbstractLanguageServerMediumT
         "[Info] Found 2 issues")
       // We don't know the order of analysis for the 2 files, so we can't have a single assertion
       .contains(
-        "[Info] Analyzing file '" + file1InFolder1 + "'...",
-        "[Info] Analyzing file '" + file2InFolder2 + "'..."));
+        "[Info] Analyzing file \"" + file1InFolder1 + "\"...",
+        "[Info] Analyzing file \"" + file2InFolder2 + "\"..."));
   }
 
   @Test

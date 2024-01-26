@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import org.jetbrains.annotations.NotNull;
 import org.sonarsource.sonarlint.core.ConnectedSonarLintEngineImpl;
 import org.sonarsource.sonarlint.core.StandaloneSonarLintEngineImpl;
 import org.sonarsource.sonarlint.core.analysis.api.ClientModulesProvider;
@@ -34,23 +35,27 @@ import org.sonarsource.sonarlint.core.client.api.connected.ConnectedSonarLintEng
 import org.sonarsource.sonarlint.core.client.api.standalone.StandaloneGlobalConfiguration;
 import org.sonarsource.sonarlint.core.client.api.standalone.StandaloneSonarLintEngine;
 import org.sonarsource.sonarlint.core.commons.Language;
-import org.sonarsource.sonarlint.core.commons.log.SonarLintLogger;
+import org.sonarsource.sonarlint.core.commons.log.ClientLogOutput;
 import org.sonarsource.sonarlint.ls.log.LanguageClientLogOutput;
 import org.sonarsource.sonarlint.ls.settings.ServerConnectionSettings;
+
+import static java.lang.String.format;
 
 public class EnginesFactory {
 
   public static Path sonarLintUserHomeOverride = null;
-
-  private static final SonarLintLogger LOG = SonarLintLogger.get();
-
   private final LanguageClientLogOutput logOutput;
   private final Collection<Path> standaloneAnalyzers;
   private final Map<String, Path> embeddedPluginsToPath;
+  private String omnisharpDirectory;
+
+
   private static final Language[] STANDALONE_LANGUAGES = {
+    Language.AZURERESOURCEMANAGER,
     Language.CPP,
     Language.C,
     Language.CLOUDFORMATION,
+    Language.CS,
     Language.CSS,
     Language.DOCKER,
     Language.GO,
@@ -58,6 +63,7 @@ public class EnginesFactory {
     Language.IPYTHON,
     Language.JAVA,
     Language.JS,
+    Language.JSON,
     Language.KUBERNETES,
     Language.PHP,
     Language.PYTHON,
@@ -71,7 +77,8 @@ public class EnginesFactory {
   private static final Language[] CONNECTED_ADDITIONAL_LANGUAGES = {
     Language.APEX,
     Language.COBOL,
-    Language.PLSQL
+    Language.PLSQL,
+    Language.TSQL
   };
 
   private final NodeJsRuntime nodeJsRuntime;
@@ -87,12 +94,16 @@ public class EnginesFactory {
     this.modulesProvider = modulesProvider;
   }
 
+  public void setOmnisharpDirectory(String omnisharpDirectory) {
+    this.omnisharpDirectory = omnisharpDirectory;
+  }
+
   public StandaloneSonarLintEngine createStandaloneEngine() {
     if (shutdown.get().equals(true)) {
       throw new IllegalStateException("Language server is shutting down, won't create engine");
     }
-    LOG.debug("Starting standalone SonarLint engine...");
-    LOG.debug("Using {} analyzers", standaloneAnalyzers.size());
+    logOutput.log("Starting standalone SonarLint engine...", ClientLogOutput.Level.DEBUG);
+    logOutput.log(format("Using %d analyzers", standaloneAnalyzers.size()), ClientLogOutput.Level.DEBUG);
 
     try {
       var configuration = StandaloneGlobalConfiguration.builder()
@@ -101,14 +112,15 @@ public class EnginesFactory {
         .setNodeJs(nodeJsRuntime.getNodeJsPath(), nodeJsRuntime.getNodeJsVersion())
         .addPlugins(standaloneAnalyzers.toArray(Path[]::new))
         .setModulesProvider(modulesProvider)
+        .setExtraProperties(getExtraProperties())
         .setLogOutput(logOutput)
         .build();
 
       var engine = newStandaloneEngine(configuration);
-      LOG.debug("Standalone SonarLint engine started");
+      logOutput.log("Standalone SonarLint engine started", ClientLogOutput.Level.DEBUG);
       return engine;
     } catch (Exception e) {
-      LOG.error("Error starting standalone SonarLint engine", e);
+      logOutput.log(format("Error starting standalone SonarLint engine %s", e), ClientLogOutput.Level.ERROR);
       throw new IllegalStateException(e);
     }
   }
@@ -133,17 +145,32 @@ public class EnginesFactory {
       .setConnectionId(connectionId)
       .addEnabledLanguages(STANDALONE_LANGUAGES)
       .addEnabledLanguages(CONNECTED_ADDITIONAL_LANGUAGES)
+      .enableDataflowBugDetection()
       .enableHotspots()
       .setNodeJs(nodeJsRuntime.getNodeJsPath(), nodeJsRuntime.getNodeJsVersion())
       .setModulesProvider(modulesProvider)
+      .setExtraProperties(getExtraProperties())
       .setLogOutput(logOutput);
 
     embeddedPluginsToPath.forEach(builder::useEmbeddedPlugin);
 
     var engine = newConnectedEngine(builder.build());
 
-    LOG.debug("SonarLint engine started for connection '{}'", connectionId);
+    logOutput.log(format("SonarLint engine started for connection '%s'", connectionId), ClientLogOutput.Level.DEBUG);
     return engine;
+  }
+
+  @NotNull
+  private Map<String, String> getExtraProperties() {
+    if (omnisharpDirectory == null) {
+      return Map.of();
+    } else {
+      return Map.of(
+        "sonar.cs.internal.omnisharpNet6Location", Path.of(omnisharpDirectory, "net6").toString(),
+        "sonar.cs.internal.omnisharpWinLocation", Path.of(omnisharpDirectory, "net472").toString(),
+        "sonar.cs.internal.omnisharpMonoLocation", Path.of(omnisharpDirectory, "mono").toString()
+      );
+    }
   }
 
   ConnectedSonarLintEngine newConnectedEngine(ConnectedGlobalConfiguration configuration) {

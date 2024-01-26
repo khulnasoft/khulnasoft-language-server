@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -33,36 +33,34 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 import javax.annotation.CheckForNull;
 import javax.annotation.Nullable;
 import org.eclipse.lsp4j.WorkspaceFolder;
 import org.eclipse.lsp4j.WorkspaceFoldersChangeEvent;
-import org.sonarsource.sonarlint.core.commons.log.SonarLintLogger;
 import org.sonarsource.sonarlint.ls.backend.BackendServiceFacade;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingManager;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingWrapper;
+import org.sonarsource.sonarlint.ls.log.LanguageClientLogOutput;
 import org.sonarsource.sonarlint.ls.util.Utils;
 
 import static java.net.URI.create;
 
 public class WorkspaceFoldersManager {
-
-  private static final SonarLintLogger LOG = SonarLintLogger.get();
-
   private final Map<URI, WorkspaceFolderWrapper> folders = new ConcurrentHashMap<>();
   private final List<WorkspaceFolderLifecycleListener> listeners = new ArrayList<>();
   private ProjectBindingManager bindingManager;
   private final BackendServiceFacade backendServiceFacade;
+  private final LanguageClientLogOutput logOutput;
   private final ExecutorService executor;
 
-  public WorkspaceFoldersManager(BackendServiceFacade backendServiceFacade) {
-    this(Executors.newCachedThreadPool(Utils.threadFactory("SonarLint folders manager", false)), backendServiceFacade);
+  public WorkspaceFoldersManager(BackendServiceFacade backendServiceFacade, LanguageClientLogOutput logOutput) {
+    this(Executors.newCachedThreadPool(Utils.threadFactory("SonarLint folders manager", false)), backendServiceFacade, logOutput);
   }
 
-  WorkspaceFoldersManager(ExecutorService executor, BackendServiceFacade backendServiceFacade) {
+  WorkspaceFoldersManager(ExecutorService executor, BackendServiceFacade backendServiceFacade, LanguageClientLogOutput logOutput) {
     this.executor = executor;
     this.backendServiceFacade = backendServiceFacade;
+    this.logOutput = logOutput;
   }
 
   public void setBindingManager(ProjectBindingManager bindingManager) {
@@ -79,7 +77,7 @@ public class WorkspaceFoldersManager {
   }
 
   public void didChangeWorkspaceFolders(WorkspaceFoldersChangeEvent event) {
-    LOG.debug("Processing didChangeWorkspaceFolders event");
+    logOutput.debug("Processing didChangeWorkspaceFolders event");
     var removedFolderWrappers = new ArrayList<WorkspaceFolderWrapper>();
     var addedFolderWrappers = new ArrayList<WorkspaceFolderWrapper>();
     for (var removed : event.getRemoved()) {
@@ -96,8 +94,7 @@ public class WorkspaceFoldersManager {
       listeners.forEach(l -> l.added(addedWrapper));
     }
     executor.submit(() -> {
-      bindingManager.subscribeForServerEvents(addedFolderWrappers, removedFolderWrappers);
-      backendServiceFacade.addFolders(event.getAdded(), getBindingProvider());
+      backendServiceFacade.getBackendService().addWorkspaceFolders(event.getAdded(), getBindingProvider());
       event.getRemoved().forEach(removed -> removeFolderFromBackend(removed.getUri()));
     });
 
@@ -107,24 +104,24 @@ public class WorkspaceFoldersManager {
   private WorkspaceFolderWrapper removeFolder(URI uri) {
     var removed = folders.remove(uri);
     if (removed == null) {
-      LOG.warn("Unregistered workspace folder was missing: " + uri);
+      logOutput.warn("Unregistered workspace folder was missing: " + uri);
       return null;
     }
-    LOG.debug("Folder {} removed", removed);
+    logOutput.debug("Folder %s removed", removed);
     listeners.forEach(l -> l.removed(removed));
     return removed;
   }
 
   private WorkspaceFolderWrapper addFolder(WorkspaceFolder added, URI uri) {
-    var addedWrapper = new WorkspaceFolderWrapper(uri, added);
+    var addedWrapper = new WorkspaceFolderWrapper(uri, added, logOutput);
     if (folders.put(uri, addedWrapper) != null) {
-      LOG.warn("Registered workspace folder {} was already added", addedWrapper);
+      logOutput.warn("Registered workspace folder %s was already added", addedWrapper);
     } else {
-      LOG.debug("Folder {} added", addedWrapper);
+      logOutput.debug("Folder %s added", addedWrapper);
     }
     executor.submit(() -> {
       var optionalProjectBindingWrapper = getBindingProvider().apply(added);
-      backendServiceFacade.addFolder(added, optionalProjectBindingWrapper);
+      backendServiceFacade.getBackendService().addWorkspaceFolder(added, optionalProjectBindingWrapper);
     });
     return addedWrapper;
   }
@@ -134,7 +131,7 @@ public class WorkspaceFoldersManager {
   }
 
   private void removeFolderFromBackend(String removedUri) {
-    backendServiceFacade.removeWorkspaceFolder(removedUri);
+    backendServiceFacade.getBackendService().removeWorkspaceFolder(removedUri);
   }
 
   public Optional<WorkspaceFolderWrapper> findFolderForFile(URI uri) {
@@ -142,12 +139,12 @@ public class WorkspaceFoldersManager {
       .filter(wfRoot -> isAncestor(wfRoot, uri))
       // Sort by path descending length to prefer the deepest one in case of multiple nested workspace folders
       .sorted(Comparator.<URI>comparingInt(wfRoot -> wfRoot.getPath().length()).reversed())
-      .collect(Collectors.toList());
+      .toList();
     if (folderUriCandidates.isEmpty()) {
       return Optional.empty();
     }
     if (folderUriCandidates.size() > 1) {
-      LOG.debug("Multiple candidates workspace folders to contains {}. Default to the deepest one.", uri);
+      logOutput.debug("Multiple candidates workspace folders to contains %s. Default to the deepest one.", uri);
     }
     return Optional.of(folders.get(folderUriCandidates.get(0)));
   }

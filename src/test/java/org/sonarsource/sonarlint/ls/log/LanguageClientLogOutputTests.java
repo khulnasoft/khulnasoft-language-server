@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -60,7 +60,7 @@ class LanguageClientLogOutputTests {
 
   @Test
   void enable_debug_logs() {
-    underTest.onChange(null, new WorkspaceSettings(false, null, null, null, null, false, true, null));
+    underTest.onChange(null, new WorkspaceSettings(false, null, null, null, null, false, true, null, false));
 
     underTest.error("error");
     underTest.warn("warn");
@@ -89,7 +89,7 @@ class LanguageClientLogOutputTests {
 
   @Test
   void enable_analyzer_logs() {
-    underTest.onChange(null, new WorkspaceSettings(false, null, null, null, null, true, false, null));
+    underTest.onChange(null, new WorkspaceSettings(false, null, null, null, null, true, false, null, false));
 
     underTest.error("error", true);
     underTest.warn("warn", true);
@@ -105,7 +105,7 @@ class LanguageClientLogOutputTests {
 
   @Test
   void enable_analyzer_debug_logs() {
-    underTest.onChange(null, new WorkspaceSettings(false, null, null, null, null, true, true, null));
+    underTest.onChange(null, new WorkspaceSettings(false, null, null, null, null, true, true, null, false));
 
     underTest.error("error", true);
     underTest.warn("warn", true);

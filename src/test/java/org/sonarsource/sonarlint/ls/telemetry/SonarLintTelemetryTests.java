@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -33,9 +33,9 @@ import org.sonarsource.sonarlint.core.telemetry.TelemetryHttpClient;
 import org.sonarsource.sonarlint.core.telemetry.TelemetryManager;
 import org.sonarsource.sonarlint.core.telemetry.TelemetryPathManager;
 import org.sonarsource.sonarlint.ls.NodeJsRuntime;
+import org.sonarsource.sonarlint.ls.backend.BackendService;
 import org.sonarsource.sonarlint.ls.backend.BackendServiceFacade;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingManager;
-import org.sonarsource.sonarlint.ls.http.ApacheHttpClientProvider;
 import org.sonarsource.sonarlint.ls.settings.SettingsManager;
 import org.sonarsource.sonarlint.ls.settings.WorkspaceSettings;
 import org.sonarsource.sonarlint.ls.standalone.StandaloneEngineManager;
@@ -51,6 +51,8 @@ import static org.sonarsource.sonarlint.ls.telemetry.SonarLintTelemetry.getStora
 class SonarLintTelemetryTests {
   private SonarLintTelemetry telemetry;
   private final TelemetryManager telemetryManager = mock(TelemetryManager.class);
+  private static final BackendServiceFacade backendServiceFacade = mock(BackendServiceFacade.class);
+  private final BackendService backendService = mock(BackendService.class);
 
   @RegisterExtension
   public SonarLintLogTester logTester = new SonarLintLogTester();
@@ -67,8 +69,9 @@ class SonarLintTelemetryTests {
 
   private SonarLintTelemetry createTelemetry() {
     when(telemetryManager.isEnabled()).thenReturn(true);
-    var telemetry = new SonarLintTelemetry(mock(ApacheHttpClientProvider.class), mock(SettingsManager.class),
-      mock(ProjectBindingManager.class), mock(NodeJsRuntime.class), mock(StandaloneEngineManager.class), mock(BackendServiceFacade.class)) {
+    when(backendServiceFacade.getBackendService()).thenReturn(backendService);
+    var telemetry = new SonarLintTelemetry(mock(SettingsManager.class), mock(ProjectBindingManager.class), mock(NodeJsRuntime.class),
+      backendServiceFacade, logTester.getLogger()) {
       @Override
       TelemetryManager newTelemetryManager(Path path, TelemetryHttpClient client) {
         return telemetryManager;
@@ -131,7 +134,7 @@ class SonarLintTelemetryTests {
   }
 
   private static WorkspaceSettings newWorkspaceSettingsWithTelemetrySetting(boolean disableTelemetry) {
-    return new WorkspaceSettings(disableTelemetry, Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), Collections.emptyMap(), false, false, null);
+    return new WorkspaceSettings(disableTelemetry, Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), Collections.emptyMap(), false, false, null, false);
   }
 
   @Test
@@ -299,8 +302,8 @@ class SonarLintTelemetryTests {
   @Test
   void should_start_disabled_when_storagePath_null() {
     when(telemetryManager.isEnabled()).thenReturn(true);
-    var telemetry = new SonarLintTelemetry(mock(ApacheHttpClientProvider.class), mock(SettingsManager.class),
-      mock(ProjectBindingManager.class), mock(NodeJsRuntime.class), mock(StandaloneEngineManager.class), mock(BackendServiceFacade.class)) {
+    var telemetry = new SonarLintTelemetry(mock(SettingsManager.class), mock(ProjectBindingManager.class), mock(NodeJsRuntime.class),
+      mock(BackendServiceFacade.class), logTester.getLogger()) {
       @Override
       TelemetryManager newTelemetryManager(Path path, TelemetryHttpClient client) {
         return telemetryManager;

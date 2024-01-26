@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -24,7 +24,11 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonSyntaxException;
 import java.net.URI;
 import java.util.Arrays;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
@@ -33,25 +37,30 @@ import javax.annotation.CheckForNull;
 import javax.annotation.Nullable;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.eclipse.lsp4j.Diagnostic;
-import org.eclipse.lsp4j.DiagnosticSeverity;
 import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.Range;
 import org.eclipse.lsp4j.jsonrpc.ResponseErrorException;
+import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.eclipse.lsp4j.jsonrpc.messages.ResponseError;
 import org.eclipse.lsp4j.jsonrpc.messages.ResponseErrorCode;
+import org.jetbrains.annotations.NotNull;
 import org.sonarsource.sonarlint.core.client.api.common.analysis.Issue;
+import org.sonarsource.sonarlint.core.clientapi.backend.connection.common.TransientSonarCloudConnectionDto;
+import org.sonarsource.sonarlint.core.clientapi.backend.connection.common.TransientSonarQubeConnectionDto;
+import org.sonarsource.sonarlint.core.clientapi.backend.connection.validate.ValidateConnectionParams;
 import org.sonarsource.sonarlint.core.clientapi.backend.hotspot.HotspotStatus;
+import org.sonarsource.sonarlint.core.clientapi.common.TokenDto;
+import org.sonarsource.sonarlint.core.clientapi.common.UsernamePasswordDto;
 import org.sonarsource.sonarlint.core.commons.HotspotReviewStatus;
-import org.sonarsource.sonarlint.core.commons.IssueSeverity;
 import org.sonarsource.sonarlint.core.commons.TextRangeWithHash;
-import org.sonarsource.sonarlint.core.commons.VulnerabilityProbability;
-import org.sonarsource.sonarlint.core.commons.log.SonarLintLogger;
 import org.sonarsource.sonarlint.core.serverapi.push.TaintVulnerabilityRaisedEvent;
 import org.sonarsource.sonarlint.core.serverconnection.issues.ServerTaintIssue;
+import org.sonarsource.sonarlint.ls.IssuesCache;
+import org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageServer;
+import org.sonarsource.sonarlint.ls.connected.DelegatingIssue;
+import org.sonarsource.sonarlint.ls.log.LanguageClientLogOutput;
 
 public class Utils {
-
-  private static final SonarLintLogger LOG = SonarLintLogger.get();
 
   private static final Pattern MATCH_ALL_WHITESPACES = Pattern.compile("\\s");
   private static final String MESSAGE_WITH_PLURALIZED_SUFFIX = "%s [+%d %s]";
@@ -81,8 +90,8 @@ public class Utils {
     };
   }
 
-  public static void interrupted(InterruptedException e) {
-    LOG.debug("Interrupted!", e);
+  public static void interrupted(InterruptedException e, LanguageClientLogOutput logOutput) {
+    logOutput.debug("Interrupted!", e);
     Thread.currentThread().interrupt();
   }
 
@@ -147,32 +156,6 @@ public class Utils {
     return convert(i).equals(d.getRange());
   }
 
-  public static DiagnosticSeverity severity(IssueSeverity severity) {
-    switch (severity) {
-      case BLOCKER:
-      case CRITICAL:
-      case MAJOR:
-        return DiagnosticSeverity.Warning;
-      case MINOR:
-        return DiagnosticSeverity.Information;
-      case INFO:
-      default:
-        return DiagnosticSeverity.Hint;
-    }
-  }
-
-  public static DiagnosticSeverity hotspotSeverity(VulnerabilityProbability vulnerabilityProbability) {
-    switch (vulnerabilityProbability) {
-      case HIGH:
-        return DiagnosticSeverity.Error;
-      case LOW:
-        return DiagnosticSeverity.Information;
-      case MEDIUM:
-      default:
-        return DiagnosticSeverity.Warning;
-    }
-  }
-
   public static String buildMessageWithPluralizedSuffix(@Nullable String issueMessage, long nbItems, String itemName) {
     return String.format(MESSAGE_WITH_PLURALIZED_SUFFIX, issueMessage, nbItems, pluralize(nbItems, itemName));
   }
@@ -194,6 +177,20 @@ public class Utils {
       textRange.getHash());
   }
 
+  @NotNull
+  public static ValidateConnectionParams getValidateConnectionParamsForNewConnection(SonarLintExtendedLanguageServer.ConnectionCheckParams params) {
+    Either<TokenDto, UsernamePasswordDto> credentials = Either.forLeft(new TokenDto(params.getToken()));
+    return params.getOrganization() != null ? new ValidateConnectionParams(
+      new TransientSonarCloudConnectionDto(params.getOrganization(), credentials)
+    ) : new ValidateConnectionParams(new TransientSonarQubeConnectionDto(params.getServerUrl(), credentials));
+  }
+
+  @NotNull
+  public static String getConnectionNameFromConnectionCheckParams(SonarLintExtendedLanguageServer.ConnectionCheckParams params) {
+    var connectionName = params.getServerUrl() == null ? params.getOrganization() : params.getServerUrl();
+    return params.getConnectionId() == null ? connectionName : params.getConnectionId();
+  }
+
   public static HotspotStatus hotspotStatusOfTitle(String title) {
     return Arrays.stream(HotspotStatus.values()).filter(hotspotStatus -> hotspotStatus.getTitle().equals(title)).findFirst()
       .orElseThrow(() -> new IllegalArgumentException("There is no such hotspot status: " + title));
@@ -205,5 +202,44 @@ public class Utils {
 
   public static HotspotReviewStatus hotspotReviewStatusValueOfHotspotStatus(HotspotStatus status) {
     return HotspotReviewStatus.valueOf(status.name());
+  }
+
+  public static String formatSha256Fingerprint(String decodedFingerprint) {
+    var split = toUpperCaseAndSplitInPairs(decodedFingerprint);
+    var sb = new StringBuilder();
+    for (var i = 0; i < split.length; i++) {
+      sb.append(split[i]);
+      if (i == split.length / 2 - 1) {
+        sb.append("\n");
+      } else if (i < split.length - 1) {
+        sb.append(" ");
+      }
+    }
+    return sb.toString();
+  }
+
+  public static String formatSha1Fingerprint(String decodedFingerprint) {
+    var split = toUpperCaseAndSplitInPairs(decodedFingerprint);
+    return String.join(" ", split);
+  }
+
+  private static String[] toUpperCaseAndSplitInPairs(String str) {
+    return str.toUpperCase(Locale.ROOT).split("(?<=\\G.{2})");
+  }
+
+  public static <T> Optional<T> safelyGetCompletableFuture(CompletableFuture<T> future, LanguageClientLogOutput logOutput) {
+    try {
+      return Optional.of(future.get());
+    } catch (InterruptedException e) {
+      interrupted(e, logOutput);
+    } catch (ExecutionException e) {
+      logOutput.warn("Future computation completed with an exception", e);
+    }
+    return Optional.empty();
+  }
+
+  public static boolean isDelegatingIssueWithServerIssueKey(String serverIssueKey, Map.Entry<String, IssuesCache.VersionedIssue> issueEntry) {
+    return issueEntry.getValue().issue() instanceof DelegatingIssue delegatingIssue
+      && (serverIssueKey.equals(delegatingIssue.getServerIssueKey()));
   }
 }

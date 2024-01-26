@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -25,18 +25,25 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import mockwebserver3.MockResponse;
 import okio.Buffer;
 import org.apache.commons.io.FileUtils;
+import org.eclipse.lsp4j.CodeAction;
+import org.eclipse.lsp4j.CodeActionContext;
+import org.eclipse.lsp4j.CodeActionParams;
+import org.eclipse.lsp4j.Command;
 import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.DiagnosticSeverity;
 import org.eclipse.lsp4j.ExecuteCommandParams;
 import org.eclipse.lsp4j.MessageParams;
 import org.eclipse.lsp4j.MessageType;
+import org.eclipse.lsp4j.TextDocumentIdentifier;
 import org.eclipse.lsp4j.TextDocumentItem;
 import org.eclipse.lsp4j.WorkspaceFolder;
+import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -47,14 +54,13 @@ import org.sonar.api.utils.DateUtils;
 import org.sonar.scanner.protocol.Constants.Severity;
 import org.sonar.scanner.protocol.input.ScannerInput;
 import org.sonarsource.sonarlint.core.clientapi.backend.hotspot.HotspotStatus;
-import org.sonarsource.sonarlint.core.clientapi.backend.issue.AddIssueCommentParams;
-import org.sonarsource.sonarlint.core.clientapi.backend.issue.IssueStatus;
 import org.sonarsource.sonarlint.core.commons.Language;
 import org.sonarsource.sonarlint.core.commons.RuleType;
 import org.sonarsource.sonarlint.core.serverapi.proto.sonarqube.ws.Common;
 import org.sonarsource.sonarlint.core.serverapi.proto.sonarqube.ws.Components;
 import org.sonarsource.sonarlint.core.serverapi.proto.sonarqube.ws.Hotspots;
 import org.sonarsource.sonarlint.core.serverapi.proto.sonarqube.ws.Issues;
+import org.sonarsource.sonarlint.core.serverapi.proto.sonarqube.ws.Measures;
 import org.sonarsource.sonarlint.core.serverapi.proto.sonarqube.ws.ProjectBranches;
 import org.sonarsource.sonarlint.core.serverapi.proto.sonarqube.ws.Qualityprofiles;
 import org.sonarsource.sonarlint.core.serverapi.proto.sonarqube.ws.Rules;
@@ -68,6 +74,7 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.groups.Tuple.tuple;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.sonar.api.rules.RuleType.SECURITY_HOTSPOT;
@@ -78,7 +85,7 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
   private static final String PYTHON_S1481 = "python:S1481";
   private static final String PYTHON_S1313 = "python:S1313";
   private static final String PROJECT_KEY = "myProject";
-  public static final String LANGUAGES_LIST = "apex,c,cpp,css,cobol,web,java,js,php,plsql,py,secrets,ts,xml,yaml,go,cloudformation,docker,kubernetes,terraform";
+  public static final String LANGUAGES_LIST = "apex,c,cpp,cs,css,cobol,web,java,js,php,plsql,py,secrets,tsql,ts,xml,yaml,json,go,cloudformation,docker,kubernetes,terraform,azureresourcemanager";
 
   @RegisterExtension
   private final MockWebServerExtension mockWebServerExtension = new MockWebServerExtension();
@@ -105,30 +112,52 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
   @BeforeEach
   public void mockSonarQube() {
     mockWebServerExtension.addStringResponse("/api/system/status", "{\"status\": \"UP\", \"version\": \"9.3\", \"id\": \"xzy\"}");
-    mockWebServerExtension.addProtobufResponse("/api/components/search.protobuf?qualifiers=TRK&ps=500&p=1", Components.SearchWsResponse.newBuilder()
-      .addComponents(Components.Component.newBuilder().setKey(PROJECT_KEY1).setName(PROJECT_NAME1).build())
-      .addComponents(Components.Component.newBuilder().setKey(PROJECT_KEY2).setName(PROJECT_NAME2).build())
-      .setPaging(Common.Paging.newBuilder().setTotal(2).build())
-      .build());
-    mockWebServerExtension.addProtobufResponse("/api/components/tree.protobuf?qualifiers=FIL,UTS&component=myProject&ps=500&p=1", Components.TreeWsResponse.newBuilder().build());
+    mockWebServerExtension.addProtobufResponse("/api/components/search.protobuf?qualifiers=TRK&ps=500&p=1",
+      Components.SearchWsResponse.newBuilder()
+        .addComponents(Components.Component.newBuilder().setKey(PROJECT_KEY1).setName(PROJECT_NAME1).build())
+        .addComponents(Components.Component.newBuilder().setKey(PROJECT_KEY2).setName(PROJECT_NAME2).build())
+        .setPaging(Common.Paging.newBuilder().setTotal(2).build())
+        .build());
+    mockWebServerExtension.addProtobufResponse("/api/components/tree.protobuf?qualifiers=FIL,UTS&component=myProject&ps=500&p=1",
+      Components.TreeWsResponse.newBuilder().build());
+    mockWebServerExtension.addProtobufResponse("/api/measures/component.protobuf?additionalFields=period&metricKeys=projects&component=" + PROJECT_KEY,
+      Measures.ComponentWsResponse.newBuilder()
+        .setComponent(Measures.Component.newBuilder()
+          .setKey(PROJECT_KEY)
+          .setQualifier("TRK")
+          .build())
+        .setPeriod(Measures.Period.newBuilder()
+          .setMode("PREVIOUS_VERSION")
+          .setParameter("0.1")
+          .build())
+        .build());
     mockWebServerExtension.addStringResponse("/api/plugins/installed",
       "{\"plugins\":[{\"key\": \"python\", \"hash\": \"ignored\", \"filename\": \"sonarpython.jar\", \"sonarLintSupported\": true}]}");
     mockWebServerExtension.addResponse("/api/plugins/download?plugin=python", new MockResponse().setBody(safeGetSonarPython()));
-    mockWebServerExtension.addProtobufResponse("/api/settings/values.protobuf?component=myProject", Settings.Values.newBuilder().build());
-    mockWebServerExtension.addProtobufResponse("/api/rules/search.protobuf?repositories=roslyn.sonaranalyzer.security.cs,javasecurity,jssecurity,phpsecurity,pythonsecurity,tssecurity&f=repo&s=key&ps=500&p=1",
-      Rules.SearchResponse.newBuilder().build());
-    mockWebServerExtension.addProtobufResponse("/api/qualityprofiles/search.protobuf?project=myProject", Qualityprofiles.SearchWsResponse.newBuilder()
-      .addProfiles(Qualityprofiles.SearchWsResponse.QualityProfile.newBuilder()
-        .setKey(QPROFILE_KEY)
-        .setLanguage("py")
-        .setRulesUpdatedAt("2022-03-14T11:13:26+0000")
-        .build())
+    mockWebServerExtension.addProtobufResponse("/api/settings/values.protobuf?component=myProject", Settings.ValuesWsResponse.newBuilder()
+      .addSettings(Settings.Setting.newBuilder()
+        .setKey("sonar.cs.file.suffixes")
+        .setValue(".cs,.razor"))
       .build());
+    mockWebServerExtension.addProtobufResponse("/api/rules/search.protobuf?repositories=roslyn.sonaranalyzer.security.cs,javasecurity," +
+        "jssecurity,phpsecurity,pythonsecurity,tssecurity&f=repo&s=key&ps=500&p=1",
+      Rules.SearchResponse.newBuilder().build());
+    mockWebServerExtension.addProtobufResponse("/api/qualityprofiles/search.protobuf?project=myProject",
+      Qualityprofiles.SearchWsResponse.newBuilder()
+        .addProfiles(Qualityprofiles.SearchWsResponse.QualityProfile.newBuilder()
+          .setKey(QPROFILE_KEY)
+          .setLanguage("py")
+          .setRulesUpdatedAt("2022-03-14T11:13:26+0000")
+          .build())
+        .build());
     Rules.Actives.Builder activeBuilder = Rules.Actives.newBuilder();
-    activeBuilder.putActives(PYTHON_S1481, Rules.ActiveList.newBuilder().addActiveList(Rules.Active.newBuilder().setSeverity("BLOCKER")).build());
-    activeBuilder.putActives(PYTHON_S1313, Rules.ActiveList.newBuilder().addActiveList(Rules.Active.newBuilder().setSeverity("MINOR")).build());
+    activeBuilder.putActives(PYTHON_S1481,
+      Rules.ActiveList.newBuilder().addActiveList(Rules.Active.newBuilder().setSeverity("BLOCKER")).build());
+    activeBuilder.putActives(PYTHON_S1313,
+      Rules.ActiveList.newBuilder().addActiveList(Rules.Active.newBuilder().setSeverity("MINOR")).build());
     mockWebServerExtension.addProtobufResponse(
-      "/api/rules/search.protobuf?qprofile=" + QPROFILE_KEY + "&activation=true&f=templateKey,actives&types=CODE_SMELL,BUG,VULNERABILITY,SECURITY_HOTSPOT&s=key&ps=500&p=1",
+      "/api/rules/search.protobuf?qprofile=" + QPROFILE_KEY + "&activation=true&f=templateKey,actives&types=CODE_SMELL,BUG,VULNERABILITY," +
+        "SECURITY_HOTSPOT&s=key&ps=500&p=1",
       Rules.SearchResponse.newBuilder()
         .setActives(activeBuilder.build())
         .setTotal(2)
@@ -150,6 +179,7 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
           .setType(Common.BranchType.BRANCH)
           .build())
         .build());
+
   }
 
   @NotNull
@@ -193,9 +223,11 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
     didOpen(uriInFolder, "python", "IP_ADDRESS = '12.34.56.78'\n");
 
     awaitUntilAsserted(() -> assertThat(client.getHotspots(uriInFolder))
-      .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
+      .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage,
+        Diagnostic::getSeverity)
       .containsExactly(
-        tuple(0, 13, 0, 26, PYTHON_S1313, "sonarlint", "Make sure using this hardcoded IP address \"12.34.56.78\" is safe here.", DiagnosticSeverity.Information)));
+        tuple(0, 13, 0, 26, PYTHON_S1313, "sonarlint", "Make sure using this hardcoded IP address \"12.34.56.78\" is safe here.",
+          DiagnosticSeverity.Warning)));
   }
 
   @Test
@@ -257,34 +289,17 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
     didOpen(uriInFolder, "python", "IP_ADDRESS = '12.34.56.78'\n");
 
     awaitUntilAsserted(() -> assertThat(client.getHotspots(uriInFolder))
-      .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
+      .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage,
+        Diagnostic::getSeverity)
       .containsExactly(
-        tuple(0, 13, 0, 26, PYTHON_S1313, "remote", "Make sure using this hardcoded IP address \"12.34.56.78\" is safe here.", DiagnosticSeverity.Information)));
+        tuple(0, 13, 0, 26, PYTHON_S1313, "remote", "Make sure using this hardcoded IP address \"12.34.56.78\" is safe here.",
+          DiagnosticSeverity.Warning)));
   }
 
   @Test
   void analysisConnected_find_tracked_hotspot_after_sq_10_1() {
     mockWebServerExtension.addStringResponse("/api/system/status", "{\"status\": \"UP\", \"version\": \"10.1\", \"id\": \"xzy\"}");
-    mockWebServerExtension.addProtobufResponseDelimited(
-      "/api/issues/pull?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST,
-      Issues.IssuesPullQueryTimestamp.newBuilder()
-        .setQueryTimestamp(CURRENT_TIME)
-        .build());
-    mockWebServerExtension.addProtobufResponseDelimited(
-      "/api/issues/pull?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST + "&changedSince=" + CURRENT_TIME,
-      Issues.IssuesPullQueryTimestamp.newBuilder()
-        .setQueryTimestamp(CURRENT_TIME)
-        .build());
-    mockWebServerExtension.addProtobufResponseDelimited(
-      "/api/issues/pull_taint?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST,
-      Issues.TaintVulnerabilityPullQueryTimestamp.newBuilder()
-        .setQueryTimestamp(CURRENT_TIME)
-        .build());
-    mockWebServerExtension.addProtobufResponseDelimited(
-      "/api/issues/pull_taint?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST + "&changedSince=" + CURRENT_TIME,
-      Issues.TaintVulnerabilityPullQueryTimestamp.newBuilder()
-        .setQueryTimestamp(CURRENT_TIME)
-        .build());
+    mockNoIssueAndNoTaintInIncrementalSync();
     mockWebServerExtension.addProtobufResponse(
       "/api/hotspots/search.protobuf?projectKey=myProject&files=hotspot.py&branch=master&ps=500&p=1",
       Hotspots.SearchWsResponse.newBuilder().build());
@@ -299,7 +314,7 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
         .build());
     mockWebServerExtension.addProtobufResponseDelimited(
       "/api/hotspots/pull?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST,
-      Hotspots.HotspotPullQueryTimestamp.newBuilder().setQueryTimestamp(System.currentTimeMillis()).build(),
+      Hotspots.HotspotPullQueryTimestamp.newBuilder().setQueryTimestamp(CURRENT_TIME).build(),
       Hotspots.HotspotLite.newBuilder()
         .setKey("myhotspotkey")
         .setFilePath("hotspot.py")
@@ -307,13 +322,34 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
         .setStatus("TO_REVIEW")
         .setVulnerabilityProbability("LOW")
         .setTextRange(Hotspots.TextRange.newBuilder()
-            .setStartLine(1)
-            .setStartLineOffset(13)
-            .setEndLine(1)
-            .setEndLineOffset(26)
-            .setHash(Utils.hash("'12.34.56.78'"))
-            .build()
-          )
+          .setStartLine(1)
+          .setStartLineOffset(13)
+          .setEndLine(1)
+          .setEndLineOffset(26)
+          .setHash(Utils.hash("'12.34.56.78'"))
+          .build()
+        )
+        .setRuleKey(PYTHON_S1313)
+        .build()
+    );
+
+    mockWebServerExtension.addProtobufResponseDelimited(
+      "/api/hotspots/pull?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST + "&changedSince=" + CURRENT_TIME,
+      Hotspots.HotspotPullQueryTimestamp.newBuilder().setQueryTimestamp(CURRENT_TIME).build(),
+      Hotspots.HotspotLite.newBuilder()
+        .setKey("myhotspotkey")
+        .setFilePath("hotspot.py")
+        .setCreationDate(System.currentTimeMillis())
+        .setStatus("TO_REVIEW")
+        .setVulnerabilityProbability("LOW")
+        .setTextRange(Hotspots.TextRange.newBuilder()
+          .setStartLine(1)
+          .setStartLineOffset(13)
+          .setEndLine(1)
+          .setEndLineOffset(26)
+          .setHash(Utils.hash("'12.34.56.78'"))
+          .build()
+        )
         .setRuleKey(PYTHON_S1313)
         .build()
     );
@@ -322,23 +358,31 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
     didOpen(uriInFolder, "python", "IP_ADDRESS = '12.34.56.78'\n");
 
     awaitUntilAsserted(() -> assertThat(client.getHotspots(uriInFolder))
-      .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
+      .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage,
+        Diagnostic::getSeverity)
       .containsExactly(
-        tuple(0, 13, 0, 26, PYTHON_S1313, "remote", "Make sure using this hardcoded IP address \"12.34.56.78\" is safe here.", DiagnosticSeverity.Information)));
+        tuple(0, 13, 0, 26, PYTHON_S1313, "remote", "Make sure using this hardcoded IP address \"12.34.56.78\" is safe here.",
+          DiagnosticSeverity.Warning)));
   }
 
   @Test
   void analysisConnected_scan_all_hotspot_then_forget() {
+    var file1 = "hotspot1.py";
+    var file2 = "hotspot2.py";
     mockNoIssuesNoHotspotsForProject();
+    mockWebServerExtension.addProtobufResponse("/api/hotspots/search.protobuf?projectKey=" + PROJECT_KEY + "&files=" + file1 + "&branch=master&ps=500&ps=1",
+      Hotspots.SearchWsResponse.newBuilder().build());
+    mockWebServerExtension.addProtobufResponse("/api/hotspots/search.protobuf?projectKey=" + PROJECT_KEY + "&files=" + file2 + "&branch=master&ps=500&ps=1",
+      Hotspots.SearchWsResponse.newBuilder().build());
 
-    var uri1InFolder = folder1BaseDir.resolve("hotspot1.py").toUri().toString();
+    var uri1InFolder = folder1BaseDir.resolve(file1).toUri().toString();
     var doc1 = new TextDocumentItem();
     doc1.setUri(uri1InFolder);
     doc1.setText("def foo():\n  id_address = '12.34.56.78'\n");
     doc1.setVersion(0);
     doc1.setLanguageId("[unknown]");
 
-    var uri2InFolder = folder1BaseDir.resolve("hotspot2.py").toUri().toString();
+    var uri2InFolder = folder1BaseDir.resolve(file2).toUri().toString();
     var doc2 = new TextDocumentItem();
     doc2.setUri(uri2InFolder);
     doc2.setText("def foo():\n  id_address = '23.45.67.89'\n");
@@ -352,15 +396,19 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
 
     awaitUntilAsserted(() -> {
       assertThat(client.getHotspots(uri1InFolder))
-        .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
+        .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage,
+          Diagnostic::getSeverity)
         .containsExactly(
-          tuple(1, 15, 1, 28, PYTHON_S1313, "sonarlint", "Make sure using this hardcoded IP address \"12.34.56.78\" is safe here.", DiagnosticSeverity.Information));
+          tuple(1, 15, 1, 28, PYTHON_S1313, "sonarlint", "Make sure using this hardcoded IP address \"12.34.56.78\" is safe here.",
+            DiagnosticSeverity.Warning));
       assertThat(client.getDiagnostics(uri1InFolder)).isEmpty();
 
       assertThat(client.getHotspots(uri2InFolder))
-        .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
+        .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage,
+          Diagnostic::getSeverity)
         .containsExactly(
-          tuple(1, 15, 1, 28, PYTHON_S1313, "sonarlint", "Make sure using this hardcoded IP address \"23.45.67.89\" is safe here.", DiagnosticSeverity.Information));
+          tuple(1, 15, 1, 28, PYTHON_S1313, "sonarlint", "Make sure using this hardcoded IP address \"23.45.67.89\" is safe here.",
+            DiagnosticSeverity.Warning));
       assertThat(client.getDiagnostics(uri2InFolder)).isEmpty();
     });
 
@@ -372,9 +420,11 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
     awaitUntilAsserted(() -> {
       // File 1 is still open, keeping hotspots
       assertThat(client.getHotspots(uri1InFolder))
-        .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
+        .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage,
+          Diagnostic::getSeverity)
         .containsExactly(
-          tuple(1, 15, 1, 28, PYTHON_S1313, "sonarlint", "Make sure using this hardcoded IP address \"12.34.56.78\" is safe here.", DiagnosticSeverity.Information));
+          tuple(1, 15, 1, 28, PYTHON_S1313, "sonarlint", "Make sure using this hardcoded IP address \"12.34.56.78\" is safe here.",
+            DiagnosticSeverity.Warning));
 
       // File 2 is not open, cleaning hotspots
       assertThat(client.getHotspots(uri2InFolder)).isEmpty();
@@ -399,14 +449,15 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
     didOpen(uriInFolder, "python", "def foo():\n  toto = 0\n  plouf = 0\n");
 
     awaitUntilAsserted(() -> assertThat(client.getDiagnostics(uriInFolder))
-      .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
+      .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage,
+        Diagnostic::getSeverity)
       .containsExactlyInAnyOrder(
         tuple(1, 2, 1, 6, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"toto\".", DiagnosticSeverity.Warning),
         tuple(2, 2, 2, 7, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"plouf\".", DiagnosticSeverity.Warning)));
   }
 
   @Test
-  void analysisConnected_matching_server_issues() {
+  void analysisConnected_matching_server_issues() throws Exception {
     mockWebServerExtension.addProtobufResponseDelimited(
       "/batch/issues?key=myProject%3AinFolder.py&branch=master",
       ScannerInput.ServerIssue.newBuilder()
@@ -420,15 +471,41 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
         .setPath("inFolder.py")
         .setLine(2)
         .build());
+    mockWebServerExtension.addProtobufResponse(
+      "/api/issues/search.protobuf?issues=xyz&additionalFields=transitions&ps=1&p=1",
+      Issues.SearchWsResponse.newBuilder()
+        .addIssues(Issues.Issue.newBuilder()
+          .setKey("xyz")
+          .setTransitions(Issues.Transitions.newBuilder()
+            .addAllTransitions(List.of("wontfix", "falsepositive"))
+            .build())
+          .build())
+        .build());
+    lsProxy.didLocalBranchNameChange(new SonarLintExtendedLanguageServer.DidLocalBranchNameChangeParams(folder1BaseDir.toUri().toString()
+      , "master"));
 
     var uriInFolder = folder1BaseDir.resolve("inFolder.py").toUri().toString();
     didOpen(uriInFolder, "python", "def foo():\n  toto = 0\n  plouf = 0\n");
 
     awaitUntilAsserted(() -> assertThat(client.getDiagnostics(uriInFolder))
-      .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
+      .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage,
+        Diagnostic::getSeverity)
       .containsExactlyInAnyOrder(
-        tuple(1, 2, 1, 6, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"toto\".", DiagnosticSeverity.Hint),
+        tuple(1, 2, 1, 6, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"toto\".", DiagnosticSeverity.Warning),
         tuple(2, 2, 2, 7, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"plouf\".", DiagnosticSeverity.Warning)));
+
+    var firstDiagnostic = client.getDiagnostics(uriInFolder).get(0);
+    var codeActionParams = new CodeActionParams();
+    codeActionParams.setTextDocument(new TextDocumentIdentifier(uriInFolder));
+    codeActionParams.setRange(firstDiagnostic.getRange());
+    codeActionParams.setContext(new CodeActionContext(List.of(firstDiagnostic)));
+
+    var codeActions = lsProxy.getTextDocumentService().codeAction(codeActionParams).get();
+    assertThat(codeActions).hasSize(2)
+      .extracting(Either::getRight)
+      .extracting(CodeAction::getCommand)
+      .extracting(Command::getCommand)
+      .containsExactlyInAnyOrder("SonarLint.ResolveIssue", "SonarLint.OpenRuleDescCodeAction");
   }
 
   @Test
@@ -446,7 +523,7 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
         .setRuleKey(PYTHON_S1481)
         .setType(Common.RuleType.BUG)
         .setMainLocation(Issues.Location.newBuilder()
-          .setFilePath("inFolder.py")
+          .setFilePath("pythonFile.py")
           .setMessage("Remove the declaration of the unused 'toto' variable.")
           .setTextRange(Issues.TextRange.newBuilder()
             .setStartLine(1)
@@ -463,11 +540,12 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
         .setQueryTimestamp(System.currentTimeMillis())
         .build());
 
-    var uriInFolder = folder1BaseDir.resolve("inFolder.py").toUri().toString();
+    var uriInFolder = folder1BaseDir.resolve("pythonFile.py").toUri().toString();
     didOpen(uriInFolder, "python", "def foo():\n  toto = 0\n  plouf = 0\n");
 
     awaitUntilAsserted(() -> assertThat(client.getDiagnostics(uriInFolder))
-      .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
+      .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage,
+        Diagnostic::getSeverity)
       .containsExactlyInAnyOrder(
         tuple(1, 2, 1, 6, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"toto\".", DiagnosticSeverity.Warning),
         tuple(2, 2, 2, 7, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"plouf\".", DiagnosticSeverity.Warning)));
@@ -483,7 +561,8 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
     var params = new GetRemoteProjectsNamesParams(CONNECTION_ID, List.of(PROJECT_KEY1, "unknown"));
 
     // Update of storage is asynchronous, eventually we get the right data in the storage :)
-    awaitUntilAsserted(() -> assertThat(lsProxy.getRemoteProjectNames(params).get()).containsExactly(Map.entry(PROJECT_KEY1, PROJECT_NAME1)));
+    awaitUntilAsserted(() -> assertThat(lsProxy.getRemoteProjectNames(params).get()).containsExactly(Map.entry(PROJECT_KEY1,
+      PROJECT_NAME1)));
   }
 
   @Test
@@ -496,7 +575,8 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
 
   @Test
   void shouldReturnRemoteProjectsForKnownConnection() throws ExecutionException, InterruptedException {
-    SonarLintExtendedLanguageServer.GetRemoteProjectsForConnectionParams testParams = new SonarLintExtendedLanguageServer.GetRemoteProjectsForConnectionParams(CONNECTION_ID);
+    SonarLintExtendedLanguageServer.GetRemoteProjectsForConnectionParams testParams =
+      new SonarLintExtendedLanguageServer.GetRemoteProjectsForConnectionParams(CONNECTION_ID);
     var result = lsProxy.getRemoteProjectsForConnection(testParams);
 
     var actual = result.get();
@@ -511,7 +591,8 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
 
   @Test
   void shouldThrowExceptionForUnknownConnection() {
-    SonarLintExtendedLanguageServer.GetRemoteProjectsForConnectionParams testParams = new SonarLintExtendedLanguageServer.GetRemoteProjectsForConnectionParams("random_string");
+    SonarLintExtendedLanguageServer.GetRemoteProjectsForConnectionParams testParams =
+      new SonarLintExtendedLanguageServer.GetRemoteProjectsForConnectionParams("random_string");
     var future = lsProxy.getRemoteProjectsForConnection(testParams);
 
     awaitUntilAsserted(() -> assertThat(future).isCompletedExceptionally());
@@ -582,7 +663,7 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
 
   @Test
   void checkLocalDetectionSupportedNotBound() throws ExecutionException, InterruptedException {
-    var result = lsProxy.checkLocalDetectionSupported(new SonarLintExtendedLanguageServer.FolderUriParams("notBound")).get();
+    var result = lsProxy.checkLocalDetectionSupported(new SonarLintExtendedLanguageServer.UriParams("notBound")).get();
 
     assertThat(result.isSupported()).isFalse();
     assertThat(result.getReason()).isEqualTo("The provided configuration scope does not exist: notBound");
@@ -606,7 +687,9 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
         .build());
 
     mockWebServerExtension.addResponse("/api/issues/do_transition", new MockResponse().setResponseCode(200));
+    mockWebServerExtension.addResponse("/api/issues/add_comment", new MockResponse().setResponseCode(200));
 
+    lsProxy.didLocalBranchNameChange(new SonarLintExtendedLanguageServer.DidLocalBranchNameChangeParams(folder1BaseDir.toUri().toString(), "some/branch/name"));
     var fileUri = folder1BaseDir.resolve("changeIssueStatus.py").toUri().toString();
     var content = "def foo():\n  toto = 0\n  plouf = 0\n";
     didOpen(fileUri, "python", content);
@@ -615,11 +698,11 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage,
         Diagnostic::getSeverity)
       .containsExactlyInAnyOrder(
-        tuple(1, 2, 1, 6, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"toto\".", DiagnosticSeverity.Hint),
+        tuple(1, 2, 1, 6, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"toto\".", DiagnosticSeverity.Warning),
         tuple(2, 2, 2, 7, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"plouf\".", DiagnosticSeverity.Warning)));
 
     lsProxy.changeIssueStatus(new SonarLintExtendedLanguageServer.ChangeIssueStatusParams(folder1BaseDir.toUri().toString(), issueKey,
-      IssueStatus.FALSE_POSITIVE, fileUri, false));
+      "False positive", fileUri, "clever comment", false));
 
     //Now we expect that one issue is resolved
     awaitUntilAsserted(() -> assertThat(client.getDiagnostics(fileUri))
@@ -627,19 +710,36 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
         Diagnostic::getSeverity)
       .containsExactlyInAnyOrder(
         tuple(2, 2, 2, 7, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"plouf\".", DiagnosticSeverity.Warning)));
+    assertThat(client.shownMessages).contains(new MessageParams(MessageType.Info, "New comment was added"));
   }
 
   @Test
   void shouldNotChangeStatusWhenServerIsDown() throws IOException {
-    var fileUri = folder1BaseDir.resolve("changeIssueStatus.py").toUri().toString();
     var issueKey = "qwerty";
+    mockWebServerExtension.addProtobufResponseDelimited(
+      "/batch/issues?key=myProject%3AchangeIssueStatus.py&branch=master",
+      ScannerInput.ServerIssue.newBuilder()
+        .setKey(issueKey)
+        .setRuleRepository("python")
+        .setRuleKey("S1481")
+        .setType(RuleType.BUG.name())
+        .setMsg("Remove the unused local variable \"toto\".")
+        .setSeverity(Severity.INFO)
+        .setManualSeverity(true)
+        .setPath("changeIssueStatus.py")
+        .setLine(2)
+        .build());
+    mockWebServerExtension.addResponse("/api/issues/do_transition", new MockResponse().setResponseCode(200));
+
+    lsProxy.didLocalBranchNameChange(new SonarLintExtendedLanguageServer.DidLocalBranchNameChangeParams(folder1BaseDir.toUri().toString(), "some/branch/name"));
+    var fileUri = folder1BaseDir.resolve("changeIssueStatus.py").toUri().toString();
     var content = "def foo():\n  toto = 0\n  plouf = 0\n";
     didOpen(fileUri, "python", content);
-    awaitUntilAsserted(() -> assertThat(client.getDiagnostics(fileUri)).isNotEmpty());
 
+    awaitUntilAsserted(() -> assertThat(client.getDiagnostics(fileUri)).isNotEmpty());
     mockWebServerExtension.stopServer();
     lsProxy.changeIssueStatus(new SonarLintExtendedLanguageServer.ChangeIssueStatusParams(folder1BaseDir.toUri().toString(), issueKey,
-      IssueStatus.FALSE_POSITIVE, fileUri, false));
+      "False positive", fileUri, "comment", false));
 
     awaitUntilAsserted(() -> assertThat(client.shownMessages).isNotEmpty());
     assertThat(client.shownMessages)
@@ -647,57 +747,14 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
   }
 
   @Test
-  void shouldAddIssueComment() {
-    var fileUri = folder1BaseDir.resolve("changeIssueStatus.py").toUri().toString();
-    var content = "def foo():\n  toto = 0\n  plouf = 0\n";
-    didOpen(fileUri, "python", content);
-    awaitUntilAsserted(() -> assertThat(client.getDiagnostics(fileUri)).isNotEmpty());
-
-    mockWebServerExtension.addResponse("/api/issues/add_comment", new MockResponse().setResponseCode(200));
-    lsProxy.addIssueComment(new AddIssueCommentParams(folder1BaseDir.toUri().toString(), "qwerty", "Meaningful and informative comment"));
-    awaitUntilAsserted(() -> assertThat(client.shownMessages).isNotEmpty());
-    assertThat(client.shownMessages).contains(new MessageParams(MessageType.Info, "New comment was added"));
-  }
-
-  @Test
-  void shouldNotAddIssueCommentWhenServerIsDown() throws IOException {
-    var fileUri = folder1BaseDir.resolve("changeIssueStatus.py").toUri().toString();
-    var content = "def foo():\n  toto = 0\n  plouf = 0\n";
-    didOpen(fileUri, "python", content);
-    awaitUntilAsserted(() -> assertThat(client.getDiagnostics(fileUri)).isNotEmpty());
-
-    mockWebServerExtension.stopServer();
-    lsProxy.addIssueComment(new AddIssueCommentParams(folder1BaseDir.toUri().toString(), "qwerty", "Meaningful and informative comment"));
-    awaitUntilAsserted(() -> assertThat(client.shownMessages).isNotEmpty());
-    assertThat(client.shownMessages).contains(new MessageParams(MessageType.Error, "Could not add a new issue comment. Look at the SonarLint output for details."));
-  }
-
-  @Test
   void change_hotspot_status_to_resolved() {
+    var analyzedFileName = "hotspot_resolved.py";
+
     mockWebServerExtension.addStringResponse("/api/system/status", "{\"status\": \"UP\", \"version\": \"10.1\", \"id\": \"xzy\"}");
     mockWebServerExtension.addResponse("/api/hotspots/change_status", new MockResponse().setResponseCode(200));
-    mockWebServerExtension.addProtobufResponseDelimited(
-      "/api/issues/pull?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST,
-      Issues.IssuesPullQueryTimestamp.newBuilder()
-        .setQueryTimestamp(CURRENT_TIME)
-        .build());
-    mockWebServerExtension.addProtobufResponseDelimited(
-      "/api/issues/pull?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST + "&changedSince=" + CURRENT_TIME,
-      Issues.IssuesPullQueryTimestamp.newBuilder()
-        .setQueryTimestamp(CURRENT_TIME)
-        .build());
-    mockWebServerExtension.addProtobufResponseDelimited(
-      "/api/issues/pull_taint?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST,
-      Issues.TaintVulnerabilityPullQueryTimestamp.newBuilder()
-        .setQueryTimestamp(CURRENT_TIME)
-        .build());
-    mockWebServerExtension.addProtobufResponseDelimited(
-      "/api/issues/pull_taint?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST + "&changedSince=" + CURRENT_TIME,
-      Issues.TaintVulnerabilityPullQueryTimestamp.newBuilder()
-        .setQueryTimestamp(CURRENT_TIME)
-        .build());
+    mockNoIssueAndNoTaintInIncrementalSync();
     mockWebServerExtension.addProtobufResponse(
-      "/api/hotspots/search.protobuf?projectKey=myProject&files=hotspot.py&branch=master&ps=500&p=1",
+      "/api/hotspots/search.protobuf?projectKey=myProject&files=" + analyzedFileName + "&branch=master&ps=500&p=1",
       Hotspots.SearchWsResponse.newBuilder().build());
     mockWebServerExtension.addProtobufResponse(
       "/api/rules/show.protobuf?key=python:S1313",
@@ -711,10 +768,30 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
     var hotspotKey = "myhotspotkey";
     mockWebServerExtension.addProtobufResponseDelimited(
       "/api/hotspots/pull?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST,
-      Hotspots.HotspotPullQueryTimestamp.newBuilder().setQueryTimestamp(System.currentTimeMillis()).build(),
+      Hotspots.HotspotPullQueryTimestamp.newBuilder().setQueryTimestamp(CURRENT_TIME).build(),
       Hotspots.HotspotLite.newBuilder()
         .setKey(hotspotKey)
-        .setFilePath("hotspot.py")
+        .setFilePath(analyzedFileName)
+        .setCreationDate(System.currentTimeMillis())
+        .setStatus("TO_REVIEW")
+        .setVulnerabilityProbability("LOW")
+        .setTextRange(Hotspots.TextRange.newBuilder()
+          .setStartLine(1)
+          .setStartLineOffset(13)
+          .setEndLine(1)
+          .setEndLineOffset(26)
+          .setHash(Utils.hash("'12.34.56.78'"))
+          .build()
+        )
+        .setRuleKey(PYTHON_S1313)
+        .build()
+    );
+    mockWebServerExtension.addProtobufResponseDelimited(
+      "/api/hotspots/pull?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST + "&changedSince=" + CURRENT_TIME,
+      Hotspots.HotspotPullQueryTimestamp.newBuilder().setQueryTimestamp(CURRENT_TIME).build(),
+      Hotspots.HotspotLite.newBuilder()
+        .setKey(hotspotKey)
+        .setFilePath(analyzedFileName)
         .setCreationDate(System.currentTimeMillis())
         .setStatus("TO_REVIEW")
         .setVulnerabilityProbability("LOW")
@@ -731,13 +808,13 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
     );
 
 
-    var uriInFolder = folder1BaseDir.resolve("hotspot.py").toUri().toString();
+    var uriInFolder = folder1BaseDir.resolve(analyzedFileName).toUri().toString();
     didOpen(uriInFolder, "python", "IP_ADDRESS = '12.34.56.78'\n");
 
     awaitUntilAsserted(() -> assertThat(client.getHotspots(uriInFolder))
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
       .containsExactly(
-        tuple(0, 13, 0, 26, PYTHON_S1313, "remote", "Make sure using this hardcoded IP address \"12.34.56.78\" is safe here.", DiagnosticSeverity.Information)));
+        tuple(0, 13, 0, 26, PYTHON_S1313, "remote", "Make sure using this hardcoded IP address \"12.34.56.78\" is safe here.", DiagnosticSeverity.Warning)));
     assertThat(client.getHotspots(uriInFolder).get(0).getData().toString()).contains("\"status\":0");
 
     lsProxy.changeHotspotStatus(new SonarLintExtendedLanguageServer.ChangeHotspotStatusParams(hotspotKey, HotspotStatus.SAFE.getTitle(), uriInFolder));
@@ -747,30 +824,13 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
 
   @Test
   void change_hotspot_status_to_acknowledged() {
+    var analyzedFileName = "hotspot_acknowledged.py";
+
     mockWebServerExtension.addStringResponse("/api/system/status", "{\"status\": \"UP\", \"version\": \"10.1\", \"id\": \"xzy\"}");
     mockWebServerExtension.addResponse("/api/hotspots/change_status", new MockResponse().setResponseCode(200));
-    mockWebServerExtension.addProtobufResponseDelimited(
-      "/api/issues/pull?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST,
-      Issues.IssuesPullQueryTimestamp.newBuilder()
-        .setQueryTimestamp(CURRENT_TIME)
-        .build());
-    mockWebServerExtension.addProtobufResponseDelimited(
-      "/api/issues/pull?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST + "&changedSince=" + CURRENT_TIME,
-      Issues.IssuesPullQueryTimestamp.newBuilder()
-        .setQueryTimestamp(CURRENT_TIME)
-        .build());
-    mockWebServerExtension.addProtobufResponseDelimited(
-      "/api/issues/pull_taint?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST,
-      Issues.TaintVulnerabilityPullQueryTimestamp.newBuilder()
-        .setQueryTimestamp(CURRENT_TIME)
-        .build());
-    mockWebServerExtension.addProtobufResponseDelimited(
-      "/api/issues/pull_taint?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST + "&changedSince=" + CURRENT_TIME,
-      Issues.TaintVulnerabilityPullQueryTimestamp.newBuilder()
-        .setQueryTimestamp(CURRENT_TIME)
-        .build());
+    mockNoIssueAndNoTaintInIncrementalSync();
     mockWebServerExtension.addProtobufResponse(
-      "/api/hotspots/search.protobuf?projectKey=myProject&files=hotspot.py&branch=master&ps=500&p=1",
+      "/api/hotspots/search.protobuf?projectKey=myProject&files=" + analyzedFileName + "&branch=master&ps=500&p=1",
       Hotspots.SearchWsResponse.newBuilder().build());
     mockWebServerExtension.addProtobufResponse(
       "/api/rules/show.protobuf?key=python:S1313",
@@ -784,10 +844,10 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
     var hotspotKey = "myhotspotkey";
     mockWebServerExtension.addProtobufResponseDelimited(
       "/api/hotspots/pull?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST,
-      Hotspots.HotspotPullQueryTimestamp.newBuilder().setQueryTimestamp(System.currentTimeMillis()).build(),
+      Hotspots.HotspotPullQueryTimestamp.newBuilder().setQueryTimestamp(CURRENT_TIME).build(),
       Hotspots.HotspotLite.newBuilder()
         .setKey(hotspotKey)
-        .setFilePath("hotspot.py")
+        .setFilePath(analyzedFileName)
         .setCreationDate(System.currentTimeMillis())
         .setStatus("TO_REVIEW")
         .setVulnerabilityProbability("LOW")
@@ -804,13 +864,13 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
     );
 
 
-    var uriInFolder = folder1BaseDir.resolve("hotspot.py").toUri().toString();
+    var uriInFolder = folder1BaseDir.resolve(analyzedFileName).toUri().toString();
     didOpen(uriInFolder, "python", "IP_ADDRESS = '12.34.56.78'\n");
 
     awaitUntilAsserted(() -> assertThat(client.getHotspots(uriInFolder))
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
       .containsExactly(
-        tuple(0, 13, 0, 26, PYTHON_S1313, "remote", "Make sure using this hardcoded IP address \"12.34.56.78\" is safe here.", DiagnosticSeverity.Information)));
+        tuple(0, 13, 0, 26, PYTHON_S1313, "remote", "Make sure using this hardcoded IP address \"12.34.56.78\" is safe here.", DiagnosticSeverity.Warning)));
     assertThat(client.getHotspots(uriInFolder).get(0).getData().toString()).contains("\"status\":0");
 
     lsProxy.changeHotspotStatus(new SonarLintExtendedLanguageServer.ChangeHotspotStatusParams(hotspotKey, HotspotStatus.ACKNOWLEDGED.getTitle(), uriInFolder));
@@ -820,30 +880,12 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
 
   @Test
   void change_hotspot_status_permission_check() throws ExecutionException, InterruptedException {
+    var analyzedFileName = "hotspot_permissions.py";
     mockWebServerExtension.addStringResponse("/api/system/status", "{\"status\": \"UP\", \"version\": \"10.1\", \"id\": \"xzy\"}");
     mockWebServerExtension.addResponse("/api/hotspots/change_status", new MockResponse().setResponseCode(200));
-    mockWebServerExtension.addProtobufResponseDelimited(
-      "/api/issues/pull?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST,
-      Issues.IssuesPullQueryTimestamp.newBuilder()
-        .setQueryTimestamp(CURRENT_TIME)
-        .build());
-    mockWebServerExtension.addProtobufResponseDelimited(
-      "/api/issues/pull?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST + "&changedSince=" + CURRENT_TIME,
-      Issues.IssuesPullQueryTimestamp.newBuilder()
-        .setQueryTimestamp(CURRENT_TIME)
-        .build());
-    mockWebServerExtension.addProtobufResponseDelimited(
-      "/api/issues/pull_taint?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST,
-      Issues.TaintVulnerabilityPullQueryTimestamp.newBuilder()
-        .setQueryTimestamp(CURRENT_TIME)
-        .build());
-    mockWebServerExtension.addProtobufResponseDelimited(
-      "/api/issues/pull_taint?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST + "&changedSince=" + CURRENT_TIME,
-      Issues.TaintVulnerabilityPullQueryTimestamp.newBuilder()
-        .setQueryTimestamp(CURRENT_TIME)
-        .build());
+    mockNoIssueAndNoTaintInIncrementalSync();
     mockWebServerExtension.addProtobufResponse(
-      "/api/hotspots/search.protobuf?projectKey=myProject&files=hotspot.py&branch=master&ps=500&p=1",
+      "/api/hotspots/search.protobuf?projectKey=myProject&files=" + analyzedFileName + "&branch=master&ps=500&p=1",
       Hotspots.SearchWsResponse.newBuilder().build());
     mockWebServerExtension.addProtobufResponse(
       "/api/rules/show.protobuf?key=python:S1313",
@@ -871,10 +913,30 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
     );
     mockWebServerExtension.addProtobufResponseDelimited(
       "/api/hotspots/pull?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST,
-      Hotspots.HotspotPullQueryTimestamp.newBuilder().setQueryTimestamp(System.currentTimeMillis()).build(),
+      Hotspots.HotspotPullQueryTimestamp.newBuilder().setQueryTimestamp(CURRENT_TIME).build(),
       Hotspots.HotspotLite.newBuilder()
         .setKey(hotspotKey)
-        .setFilePath("hotspot.py")
+        .setFilePath(analyzedFileName)
+        .setCreationDate(System.currentTimeMillis())
+        .setStatus("TO_REVIEW")
+        .setVulnerabilityProbability("LOW")
+        .setTextRange(Hotspots.TextRange.newBuilder()
+          .setStartLine(1)
+          .setStartLineOffset(13)
+          .setEndLine(1)
+          .setEndLineOffset(26)
+          .setHash(Utils.hash("'12.34.56.78'"))
+          .build()
+        )
+        .setRuleKey(PYTHON_S1313)
+        .build()
+    );
+    mockWebServerExtension.addProtobufResponseDelimited(
+      "/api/hotspots/pull?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST + "&changedSince=" + CURRENT_TIME,
+      Hotspots.HotspotPullQueryTimestamp.newBuilder().setQueryTimestamp(CURRENT_TIME).build(),
+      Hotspots.HotspotLite.newBuilder()
+        .setKey(hotspotKey)
+        .setFilePath(analyzedFileName)
         .setCreationDate(System.currentTimeMillis())
         .setStatus("TO_REVIEW")
         .setVulnerabilityProbability("LOW")
@@ -891,13 +953,13 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
     );
 
 
-    var uriInFolder = folder1BaseDir.resolve("hotspot.py").toUri().toString();
+    var uriInFolder = folder1BaseDir.resolve(analyzedFileName).toUri().toString();
     didOpen(uriInFolder, "python", "IP_ADDRESS = '12.34.56.78'\n");
 
     awaitUntilAsserted(() -> assertThat(client.getHotspots(uriInFolder))
       .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage, Diagnostic::getSeverity)
       .containsExactly(
-        tuple(0, 13, 0, 26, PYTHON_S1313, "remote", "Make sure using this hardcoded IP address \"12.34.56.78\" is safe here.", DiagnosticSeverity.Information)));
+        tuple(0, 13, 0, 26, PYTHON_S1313, "remote", "Make sure using this hardcoded IP address \"12.34.56.78\" is safe here.", DiagnosticSeverity.Warning)));
 
 
     var response = lsProxy.getAllowedHotspotStatuses(
@@ -906,6 +968,160 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
     assertThat(response.isPermitted()).isTrue();
     assertThat(response.getNotPermittedReason()).isNull();
     assertThat(response.getAllowedStatuses()).containsExactly("Acknowledged", "Fixed", "Safe");
+  }
+
+  @Test
+  void change_issue_status_permission_check() throws ExecutionException, InterruptedException {
+    var issueKey = UUID.randomUUID().toString();
+    mockWebServerExtension.addProtobufResponseDelimited(
+      "/batch/issues?key=myProject%3AchangeIssueStatus.py&branch=master",
+      ScannerInput.ServerIssue.newBuilder()
+        .setKey(issueKey)
+        .setRuleRepository("python")
+        .setRuleKey("S1481")
+        .setType(RuleType.BUG.name())
+        .setMsg("Remove the unused local variable \"toto\".")
+        .setSeverity(Severity.INFO)
+        .setManualSeverity(true)
+        .setPath("changeIssueStatus.py")
+        .setLine(2)
+        .build());
+    mockWebServerExtension.addProtobufResponse(
+      "/api/issues/search.protobuf?issues=" + issueKey + "&additionalFields=transitions&ps=1&p=1",
+      Issues.SearchWsResponse.newBuilder()
+        .addIssues(Issues.Issue.newBuilder()
+          .setKey("xyz")
+          .setTransitions(Issues.Transitions.newBuilder()
+            .addAllTransitions(List.of("wontfix", "falsepositive"))
+            .build())
+          .build())
+        .build());
+    mockWebServerExtension.addProtobufResponse(
+      "/api/issues/search.protobuf?statuses=OPEN,CONFIRMED,REOPENED,RESOLVED&types=VULNERABILITY&componentKeys=myProject%3AchangeIssueStatus.py&rules=&branch=master&ps=500&p=1",
+      Issues.SearchWsResponse.newBuilder()
+        .addIssues(Issues.Issue.newBuilder()
+          .setKey("xyz")
+          .setTransitions(Issues.Transitions.newBuilder()
+            .addAllTransitions(List.of("wontfix", "falsepositive"))
+            .build())
+          .build())
+        .build());
+    mockWebServerExtension.addProtobufResponse("/api/issues/search.protobuf?statuses=OPEN,CONFIRMED,REOPENED,RESOLVED&types=VULNERABILITY&componentKeys=myProject%3AchangeIssueStatus.py&rules=&branch=master&ps=500&p=2",
+      Issues.SearchWsResponse.newBuilder().addComponents(Issues.Component.newBuilder().setKey("componentKey").setPath("componentPath").build()).build());
+    // /api/issues/search.protobuf?statuses=OPEN,CONFIRMED,REOPENED,RESOLVED&types=VULNERABILITY&componentKeys=myProject%3AchangeIssueStatus.py&rules=&branch=master&ps=500&p=2
+
+
+    mockWebServerExtension.addResponse("/api/issues/do_transition", new MockResponse().setResponseCode(200));
+    mockWebServerExtension.addResponse("/api/issues/add_comment", new MockResponse().setResponseCode(200));
+
+    lsProxy.didLocalBranchNameChange(new SonarLintExtendedLanguageServer.DidLocalBranchNameChangeParams(folder1BaseDir.toUri().toString(), "some/branch/name"));
+    var fileUri = folder1BaseDir.resolve("changeIssueStatus.py").toUri().toString();
+    var content = "def foo():\n  toto = 0\n  plouf = 0\n";
+    didOpen(fileUri, "python", content);
+
+    awaitUntilAsserted(() -> assertThat(client.getDiagnostics(fileUri))
+      .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage,
+        Diagnostic::getSeverity)
+      .containsExactlyInAnyOrder(
+        tuple(1, 2, 1, 6, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"toto\".", DiagnosticSeverity.Warning),
+        tuple(2, 2, 2, 7, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"plouf\".", DiagnosticSeverity.Warning)));
+
+    var result = lsProxy.checkIssueStatusChangePermitted(new SonarLintExtendedLanguageServer.CheckIssueStatusChangePermittedParams(folder1BaseDir.toUri().toString(), issueKey)).get();
+
+    awaitUntilAsserted(() -> {
+      assertTrue(result.isPermitted());
+      assertThat(result.getNotPermittedReason()).isNull();
+      assertThat(result.getAllowedStatuses()).containsExactly("Won't fix", "False positive");
+    });
+  }
+
+  @Test
+  void change_issue_status_permission_check_exceptionally() throws ExecutionException, InterruptedException {
+    var issueKey = "malformed issue UUID";
+    mockWebServerExtension.addProtobufResponseDelimited(
+      "/batch/issues?key=myProject%3AchangeIssueStatus.py&branch=master",
+      ScannerInput.ServerIssue.newBuilder()
+        .setKey(issueKey)
+        .setRuleRepository("python")
+        .setRuleKey("S1481")
+        .setType(RuleType.BUG.name())
+        .setMsg("Remove the unused local variable \"toto\".")
+        .setSeverity(Severity.INFO)
+        .setManualSeverity(true)
+        .setPath("changeIssueStatus.py")
+        .setLine(2)
+        .build());
+    mockWebServerExtension.addProtobufResponse(
+      "/api/issues/search.protobuf?issues=" + issueKey + "&additionalFields=transitions&ps=1&p=1",
+      Issues.SearchWsResponse.newBuilder()
+        .addIssues(Issues.Issue.newBuilder()
+          .setKey("xyz")
+          .setTransitions(Issues.Transitions.newBuilder()
+            .addAllTransitions(List.of("wontfix", "falsepositive"))
+            .build())
+          .build())
+        .build());
+    mockWebServerExtension.addProtobufResponse(
+      "/api/issues/search.protobuf?statuses=OPEN,CONFIRMED,REOPENED,RESOLVED&types=VULNERABILITY&componentKeys=myProject%3AchangeIssueStatus.py&rules=&branch=master&ps=500&p=1",
+      Issues.SearchWsResponse.newBuilder()
+        .addIssues(Issues.Issue.newBuilder()
+          .setKey("xyz")
+          .setTransitions(Issues.Transitions.newBuilder()
+            .addAllTransitions(List.of("wontfix", "falsepositive"))
+            .build())
+          .build())
+        .build());
+    mockWebServerExtension.addProtobufResponse("/api/issues/search.protobuf?statuses=OPEN,CONFIRMED,REOPENED,RESOLVED&types=VULNERABILITY&componentKeys=myProject%3AchangeIssueStatus.py&rules=&branch=master&ps=500&p=2",
+      Issues.SearchWsResponse.newBuilder().addComponents(Issues.Component.newBuilder().setKey("componentKey").setPath("componentPath").build()).build());
+
+
+    mockWebServerExtension.addResponse("/api/issues/do_transition", new MockResponse().setResponseCode(200));
+    mockWebServerExtension.addResponse("/api/issues/add_comment", new MockResponse().setResponseCode(200));
+
+    lsProxy.didLocalBranchNameChange(new SonarLintExtendedLanguageServer.DidLocalBranchNameChangeParams(folder1BaseDir.toUri().toString(), "some/branch/name"));
+    var fileUri = folder1BaseDir.resolve("changeIssueStatus.py").toUri().toString();
+    var content = "def foo():\n  toto = 0\n  plouf = 0\n";
+    didOpen(fileUri, "python", content);
+
+    awaitUntilAsserted(() -> assertThat(client.getDiagnostics(fileUri))
+      .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage,
+        Diagnostic::getSeverity)
+      .containsExactlyInAnyOrder(
+        tuple(1, 2, 1, 6, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"toto\".", DiagnosticSeverity.Warning),
+        tuple(2, 2, 2, 7, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"plouf\".", DiagnosticSeverity.Warning)));
+
+    var result = lsProxy.checkIssueStatusChangePermitted(new SonarLintExtendedLanguageServer.CheckIssueStatusChangePermittedParams(folder1BaseDir.toUri().toString(), issueKey)).get();
+
+    awaitUntilAsserted(() -> {
+      assertNull(result);
+      assertThat(client.logs)
+        .extracting(withoutTimestamp())
+        .contains("Could not get issue status change for issue \""
+        + issueKey + "\". Look at the SonarLint output for details.");
+    });
+  }
+
+  private void mockNoIssueAndNoTaintInIncrementalSync() {
+    mockWebServerExtension.addProtobufResponseDelimited(
+      "/api/issues/pull?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST,
+      Issues.IssuesPullQueryTimestamp.newBuilder()
+        .setQueryTimestamp(CURRENT_TIME)
+        .build());
+    mockWebServerExtension.addProtobufResponseDelimited(
+      "/api/issues/pull?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST + "&changedSince=" + CURRENT_TIME,
+      Issues.IssuesPullQueryTimestamp.newBuilder()
+        .setQueryTimestamp(CURRENT_TIME)
+        .build());
+    mockWebServerExtension.addProtobufResponseDelimited(
+      "/api/issues/pull_taint?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST,
+      Issues.TaintVulnerabilityPullQueryTimestamp.newBuilder()
+        .setQueryTimestamp(CURRENT_TIME)
+        .build());
+    mockWebServerExtension.addProtobufResponseDelimited(
+      "/api/issues/pull_taint?projectKey=myProject&branchName=master&languages=" + LANGUAGES_LIST + "&changedSince=" + CURRENT_TIME,
+      Issues.TaintVulnerabilityPullQueryTimestamp.newBuilder()
+        .setQueryTimestamp(CURRENT_TIME)
+        .build());
   }
 
   private void mockNoIssuesNoHotspotsForProject() {
@@ -940,4 +1156,63 @@ class ConnectedModeMediumTests extends AbstractLanguageServerMediumTests {
     );
   }
 
+  @Test
+  void shouldChangeLocalIssueStatus() {
+    var fileUri = folder1BaseDir.resolve("changeLocalIssueStatus.py").toUri().toString();
+    assertLocalIssuesStatusChanged(fileUri);
+  }
+
+  @Test
+  void shouldReopenResolvedLocalIssues() {
+    var fileName = "changeAndReopenLocalIssueStatus.py";
+    var fileUri = folder1BaseDir.resolve(fileName).toUri().toString();
+    assertLocalIssuesStatusChanged(fileUri);
+
+    lsProxy.reopenResolvedLocalIssues(new SonarLintExtendedLanguageServer.ReopenAllIssuesForFileParams(fileName, fileUri, folder1BaseDir.toUri().toString()));
+
+    awaitUntilAsserted(() -> assertThat(client.getDiagnostics(fileUri))
+      .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage,
+        Diagnostic::getSeverity)
+      .containsExactlyInAnyOrder(
+        tuple(1, 2, 1, 6, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"toto\".", DiagnosticSeverity.Warning),
+        tuple(2, 2, 2, 7, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"plouf\".", DiagnosticSeverity.Warning)));
+  }
+
+  @Test
+  void shouldIgnoreRazorFile() {
+    var uriInFolder = folder1BaseDir.resolve("shouldIgnore.razor").toUri().toString();
+    didOpen(uriInFolder, "csharp", "@using System");
+
+    awaitUntilAsserted(() -> assertLogContains("Found 0 issues"));
+    assertLogContains("'OmniSharp' skipped because there is no related files in the current project");
+  }
+
+  private void assertLocalIssuesStatusChanged(String fileUri) {
+    mockWebServerExtension.addResponse("/api/issues/anticipated_transitions?projectKey=myProject", new MockResponse().setResponseCode(200));
+    mockWebServerExtension.addResponse("/api/issues/add_comment", new MockResponse().setResponseCode(200));
+
+    lsProxy.didLocalBranchNameChange(new SonarLintExtendedLanguageServer.DidLocalBranchNameChangeParams(folder1BaseDir.toUri().toString(), "some/branch/name"));
+    var content = "def foo():\n  toto = 0\n  plouf = 0\n";
+    didOpen(fileUri, "python", content);
+
+    awaitUntilAsserted(() -> assertThat(client.getDiagnostics(fileUri))
+      .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage,
+        Diagnostic::getSeverity)
+      .containsExactlyInAnyOrder(
+        tuple(1, 2, 1, 6, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"toto\".", DiagnosticSeverity.Warning),
+        tuple(2, 2, 2, 7, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"plouf\".", DiagnosticSeverity.Warning)));
+
+    var diagnostics = client.getDiagnostics(fileUri);
+    var issueKey = ((JsonObject) diagnostics.stream().filter(it -> it.getMessage().equals("Remove the unused local variable \"plouf\"."))
+      .findFirst().get().getData()).get("entryKey").getAsString();
+    lsProxy.changeIssueStatus(new SonarLintExtendedLanguageServer.ChangeIssueStatusParams(folder1BaseDir.toUri().toString(), issueKey,
+      "False positive", fileUri, "", false));
+
+    //Now we expect that one issue is resolved
+    awaitUntilAsserted(() -> assertThat(client.getDiagnostics(fileUri))
+      .extracting(startLine(), startCharacter(), endLine(), endCharacter(), code(), Diagnostic::getSource, Diagnostic::getMessage,
+        Diagnostic::getSeverity)
+      .containsExactlyInAnyOrder(
+        tuple(1, 2, 1, 6, PYTHON_S1481, "sonarlint", "Remove the unused local variable \"toto\".", DiagnosticSeverity.Warning)));
+  }
 }

@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -19,17 +19,18 @@
  */
 package org.sonarsource.sonarlint.ls;
 
+import com.google.common.annotations.VisibleForTesting;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.stream.Collectors;
+import java.util.concurrent.atomic.AtomicLong;
 import javax.annotation.CheckForNull;
 import javax.annotation.Nullable;
 import org.sonarsource.sonarlint.ls.connected.ProjectBindingManager;
@@ -47,7 +48,6 @@ import org.sonarsource.sonarlint.ls.settings.WorkspaceSettingsChangeListener;
 import org.sonarsource.sonarlint.ls.util.Utils;
 
 import static java.lang.String.format;
-import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toSet;
 
 /**
@@ -57,7 +57,6 @@ public class AnalysisScheduler implements WorkspaceSettingsChangeListener, Works
 
   private static final CompletableFuture<Void> COMPLETED_FUTURE = CompletableFuture.completedFuture(null);
   private static final int DEFAULT_TIMER_MS = 2000;
-  private static final int QUEUE_POLLING_PERIOD_MS = 200;
 
   static final String SONARLINT_SOURCE = "sonarlint";
   public static final String SONARQUBE_TAINT_SOURCE = "Latest SonarQube Analysis";
@@ -68,24 +67,28 @@ public class AnalysisScheduler implements WorkspaceSettingsChangeListener, Works
 
   private final OpenFilesCache openFilesCache;
   private final OpenNotebooksCache openNotebooksCache;
-  // entries in this map mean that the file is "dirty"
-  private final Map<URI, Long> eventMap = new ConcurrentHashMap<>();
+
+  // entries in this set mean that the file is "dirty"
+  private final Set<URI> events = new HashSet<>();
+  private final AtomicLong oldestEvent = new AtomicLong(Long.MAX_VALUE);
 
   private final WorkspaceFoldersManager workspaceFoldersManager;
   private final ProjectBindingManager bindingManager;
   private final EventWatcher watcher;
   private final LanguageClientLogger lsLogOutput;
   private final AnalysisTaskExecutor analysisTaskExecutor;
+  private final SonarLintExtendedLanguageClient client;
 
   private final ExecutorService asyncExecutor;
 
   public AnalysisScheduler(LanguageClientLogger lsLogOutput, WorkspaceFoldersManager workspaceFoldersManager, ProjectBindingManager bindingManager, OpenFilesCache openFilesCache,
-    OpenNotebooksCache openNotebooksCache, AnalysisTaskExecutor analysisTaskExecutor) {
-    this(lsLogOutput, workspaceFoldersManager, bindingManager, openFilesCache, openNotebooksCache, analysisTaskExecutor, DEFAULT_TIMER_MS);
+    OpenNotebooksCache openNotebooksCache, AnalysisTaskExecutor analysisTaskExecutor, SonarLintExtendedLanguageClient client) {
+    this(lsLogOutput, workspaceFoldersManager, bindingManager, openFilesCache, openNotebooksCache, analysisTaskExecutor, DEFAULT_TIMER_MS, client);
   }
 
+  @VisibleForTesting
   AnalysisScheduler(LanguageClientLogger lsLogOutput, WorkspaceFoldersManager workspaceFoldersManager, ProjectBindingManager bindingManager, OpenFilesCache openFilesCache,
-    OpenNotebooksCache openNotebooksCache, AnalysisTaskExecutor analysisTaskExecutor, int defaultTimerMs) {
+    OpenNotebooksCache openNotebooksCache, AnalysisTaskExecutor analysisTaskExecutor, long analysisTimerMs, SonarLintExtendedLanguageClient client) {
     this.lsLogOutput = lsLogOutput;
     this.workspaceFoldersManager = workspaceFoldersManager;
     this.bindingManager = bindingManager;
@@ -93,7 +96,8 @@ public class AnalysisScheduler implements WorkspaceSettingsChangeListener, Works
     this.openNotebooksCache = openNotebooksCache;
     this.analysisTaskExecutor = analysisTaskExecutor;
     this.asyncExecutor = Executors.newSingleThreadExecutor(Utils.threadFactory("SonarLint Language Server Analysis Scheduler", false));
-    this.watcher = new EventWatcher(defaultTimerMs);
+    this.watcher = new EventWatcher(analysisTimerMs);
+    this.client = client;
   }
 
   public void didOpen(VersionedOpenFile file) {
@@ -101,20 +105,25 @@ public class AnalysisScheduler implements WorkspaceSettingsChangeListener, Works
   }
 
   public void didChange(URI fileUri) {
-    eventMap.put(fileUri, System.currentTimeMillis());
+    recordEvent(fileUri);
   }
 
   public void didReceiveHotspotEvent(URI fileUri) {
-    eventMap.put(fileUri, System.currentTimeMillis());
+    recordEvent(fileUri);
+  }
+
+  private void recordEvent(URI fileUri) {
+    oldestEvent.compareAndSet(Long.MAX_VALUE, System.currentTimeMillis());
+    events.add(fileUri);
   }
 
   private class EventWatcher extends Thread {
     private Future<?> onChangeCurrentTask = COMPLETED_FUTURE;
     private boolean stop = false;
-    private final int defaultTimerMs;
+    private final long analysisTimerMs;
 
-    EventWatcher(int defaultTimerMs) {
-      this.defaultTimerMs = defaultTimerMs;
+    EventWatcher(long analysisTimerMs) {
+      this.analysisTimerMs = analysisTimerMs;
       this.setDaemon(true);
       this.setName("sonarlint-auto-trigger");
     }
@@ -130,7 +139,7 @@ public class AnalysisScheduler implements WorkspaceSettingsChangeListener, Works
       while (!stop) {
         checkTimers();
         try {
-          Thread.sleep(QUEUE_POLLING_PERIOD_MS);
+          Thread.sleep(this.analysisTimerMs / 10);
         } catch (InterruptedException e) {
           // continue until stop flag is set
         }
@@ -138,18 +147,19 @@ public class AnalysisScheduler implements WorkspaceSettingsChangeListener, Works
     }
 
     private void checkTimers() {
-      var now = System.currentTimeMillis();
-
-      var it = eventMap.entrySet().iterator();
-      var filesToTrigger = new ArrayList<VersionedOpenFile>();
-      while (it.hasNext()) {
-        var e = it.next();
-        if (e.getValue() + defaultTimerMs < now) {
-          openFilesCache.getFile(e.getKey()).ifPresent(filesToTrigger::add);
-          openNotebooksCache.getFile(e.getKey()).ifPresent(notebook -> filesToTrigger.add(notebook.asVersionedOpenFile()));
+      long now = System.currentTimeMillis();
+      long oldestEventTimeMs = oldestEvent.get();
+      if (now > oldestEventTimeMs + analysisTimerMs && !events.isEmpty()) {
+        var it = events.iterator();
+        var filesToTrigger = new ArrayList<VersionedOpenFile>();
+        while (it.hasNext()) {
+          var e = it.next();
+          openFilesCache.getFile(e).ifPresent(filesToTrigger::add);
+          openNotebooksCache.getFile(e).ifPresent(notebook -> filesToTrigger.add(notebook.asVersionedOpenFile()));
         }
+        triggerFiles(filesToTrigger);
+        oldestEvent.set(Long.MAX_VALUE);
       }
-      triggerFiles(filesToTrigger);
     }
 
     private void triggerFiles(List<VersionedOpenFile> filesToTrigger) {
@@ -160,14 +170,14 @@ public class AnalysisScheduler implements WorkspaceSettingsChangeListener, Works
           // Wait for the next loop of EventWatcher to recheck if task has been successfully cancelled and then trigger the analysis
           return;
         }
-        filesToTrigger.forEach(f -> eventMap.remove(f.getUri()));
+        filesToTrigger.forEach(f -> events.remove(f.getUri()));
         onChangeCurrentTask = analyzeAsync(AnalysisParams.newAnalysisParams(filesToTrigger));
       }
     }
   }
 
   public void didClose(URI fileUri) {
-    eventMap.remove(fileUri);
+    events.remove(fileUri);
   }
 
   public static class AnalysisParams {
@@ -221,7 +231,7 @@ public class AnalysisScheduler implements WorkspaceSettingsChangeListener, Works
     }
     if (trueFileUris.size() == 1) {
       VersionedOpenFile openFile = trueFileUris.iterator().next();
-      lsLogOutput.debug(format("Queuing analysis of file '%s' (version %d)", openFile.getUri(), openFile.getVersion()));
+      lsLogOutput.debug(format("Queuing analysis of file \"%s\" (version %d)", openFile.getUri(), openFile.getVersion()));
     } else {
       lsLogOutput.debug(format("Queuing analysis of %d files", trueFileUris.size()));
     }
@@ -237,15 +247,27 @@ public class AnalysisScheduler implements WorkspaceSettingsChangeListener, Works
 
   public void shutdown() {
     watcher.stopWatcher();
-    eventMap.clear();
+    events.clear();
     Utils.shutdownAndAwait(asyncExecutor, true);
   }
 
   public void analyzeAllOpenFilesInFolder(@Nullable WorkspaceFolderWrapper folder) {
     var openedFileUrisInFolder = openFilesCache.getAll().stream()
       .filter(f -> belongToFolder(folder, f.getUri()))
-      .collect(Collectors.toList());
-    analyzeAsync(AnalysisParams.newAnalysisParams(openedFileUrisInFolder));
+      .toList();
+    analyseNotIgnoredFiles(openedFileUrisInFolder);
+  }
+
+  private void analyseNotIgnoredFiles(List<VersionedOpenFile> files) {
+    var uriStrings = files.stream().map(it -> it.getUri().toString()).toList();
+    var fileUrisParams = new SonarLintExtendedLanguageClient.FileUrisParams(uriStrings);
+    client.filterOutExcludedFiles(fileUrisParams)
+      .thenAccept(notIgnoredFileUris -> {
+        var notIgnoredFiles = files
+          .stream().filter(it -> notIgnoredFileUris.getFileUris().contains(it.getUri().toString()))
+          .toList();
+        analyzeAsync(AnalysisParams.newAnalysisParams(notIgnoredFiles));
+      });
   }
 
   private boolean belongToFolder(WorkspaceFolderWrapper folder, URI fileUri) {
@@ -282,8 +304,8 @@ public class AnalysisScheduler implements WorkspaceSettingsChangeListener, Works
     var openedCorCppFileUrisInFolder = openFilesCache.getAll().stream()
       .filter(VersionedOpenFile::isCOrCpp)
       .filter(f -> belongToFolder(folder, f.getUri()))
-      .collect(Collectors.toList());
-    analyzeAsync(AnalysisParams.newAnalysisParams(openedCorCppFileUrisInFolder));
+      .toList();
+    analyseNotIgnoredFiles(openedCorCppFileUrisInFolder);
   }
 
   public void scanForHotspotsInFiles(List<VersionedOpenFile> files) {
@@ -297,22 +319,22 @@ public class AnalysisScheduler implements WorkspaceSettingsChangeListener, Works
   private void analyzeAllUnboundOpenFiles() {
     var openedUnboundFileUris = openFilesCache.getAll().stream()
       .filter(f -> bindingManager.getBinding(f.getUri()).isEmpty())
-      .collect(Collectors.toList());
-    analyzeAsync(AnalysisParams.newAnalysisParams(openedUnboundFileUris));
+      .toList();
+    analyseNotIgnoredFiles(openedUnboundFileUris);
   }
 
   private void analyzeAllOpenNotebooks() {
     var openNotebookUris = openNotebooksCache.getAll().stream()
       .map(VersionedOpenNotebook::asVersionedOpenFile)
-      .collect(Collectors.toList());
-    analyzeAsync(AnalysisParams.newAnalysisParams(openNotebookUris));
+      .toList();
+    analyseNotIgnoredFiles(openNotebookUris);
   }
 
   private void analyzeAllOpenJavaFiles() {
     var openedJavaFileUris = openFilesCache.getAll().stream()
       .filter(VersionedOpenFile::isJava)
-      .collect(toList());
-    analyzeAsync(AnalysisParams.newAnalysisParams(openedJavaFileUris));
+      .toList();
+    analyseNotIgnoredFiles(openedJavaFileUris);
   }
 
   public void didClasspathUpdate() {

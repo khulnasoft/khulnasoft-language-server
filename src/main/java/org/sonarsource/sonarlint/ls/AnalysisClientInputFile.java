@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -20,7 +20,6 @@
 package org.sonarsource.sonarlint.ls;
 
 import java.io.ByteArrayInputStream;
-import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.nio.charset.Charset;
@@ -73,7 +72,7 @@ public class AnalysisClientInputFile implements ClientInputFile {
   }
 
   @Override
-  public String contents() throws IOException {
+  public String contents() {
     return content;
   }
 
@@ -98,31 +97,18 @@ public class AnalysisClientInputFile implements ClientInputFile {
       return null;
     }
     // See https://microsoft.github.io/language-server-protocol/specification#textDocumentItem
-    switch (clientLanguageId) {
-      case "javascript":
-      case "javascriptreact":
-      case "vue":
-      case "vue component":
-      case "babel es6 javascript":
-        return Language.JS;
-      case "python":
-        return Language.PYTHON;
-      case "typescript":
-      case "typescriptreact":
-        return Language.TS;
-      case "html":
-        return Language.HTML;
-      case "oraclesql":
-        return Language.PLSQL;
-      case "apex":
-      case "apex-anon":
+    return switch (clientLanguageId) {
+      case "javascript", "javascriptreact", "vue", "vue component", "babel es6 javascript" -> Language.JS;
+      case "python" -> Language.PYTHON;
+      case "typescript", "typescriptreact" -> Language.TS;
+      case "html" -> Language.HTML;
+      case "oraclesql" -> Language.PLSQL;
+      case "apex", "apex-anon" ->
         // See https://github.com/forcedotcom/salesforcedx-vscode/blob/5e4b7715d1cb3d1ee2780780ed63f70f58e93b20/packages/salesforcedx-vscode-apex/package.json#L273
-        return Language.APEX;
-      case "yaml":
-        return Language.YAML;
-      default:
+        Language.APEX;
+      default ->
         // Other supported languages map to the same key as the one used in SonarQube/SonarCloud
-        return Language.forKey(clientLanguageId).orElse(null);
-    }
+        Language.forKey(clientLanguageId).orElse(null);
+    };
   }
 }

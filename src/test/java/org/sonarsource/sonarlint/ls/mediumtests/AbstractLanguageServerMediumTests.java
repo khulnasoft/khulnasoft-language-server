@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -59,6 +59,7 @@ import org.eclipse.lsp4j.ConfigurationItem;
 import org.eclipse.lsp4j.ConfigurationParams;
 import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.DidChangeConfigurationParams;
+import org.eclipse.lsp4j.DidChangeNotebookDocumentParams;
 import org.eclipse.lsp4j.DidChangeTextDocumentParams;
 import org.eclipse.lsp4j.DidChangeWorkspaceFoldersParams;
 import org.eclipse.lsp4j.DidCloseNotebookDocumentParams;
@@ -70,6 +71,7 @@ import org.eclipse.lsp4j.InitializedParams;
 import org.eclipse.lsp4j.MessageActionItem;
 import org.eclipse.lsp4j.MessageParams;
 import org.eclipse.lsp4j.NotebookDocument;
+import org.eclipse.lsp4j.NotebookDocumentChangeEvent;
 import org.eclipse.lsp4j.NotebookDocumentClientCapabilities;
 import org.eclipse.lsp4j.NotebookDocumentIdentifier;
 import org.eclipse.lsp4j.NotebookDocumentSyncClientCapabilities;
@@ -79,6 +81,7 @@ import org.eclipse.lsp4j.ShowMessageRequestParams;
 import org.eclipse.lsp4j.TextDocumentContentChangeEvent;
 import org.eclipse.lsp4j.TextDocumentIdentifier;
 import org.eclipse.lsp4j.TextDocumentItem;
+import org.eclipse.lsp4j.VersionedNotebookDocumentIdentifier;
 import org.eclipse.lsp4j.VersionedTextDocumentIdentifier;
 import org.eclipse.lsp4j.WindowClientCapabilities;
 import org.eclipse.lsp4j.WorkspaceFolder;
@@ -112,6 +115,11 @@ import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.sonarsource.sonarlint.ls.SonarLintLanguageServer.JUPYTER_NOTEBOOK_TYPE;
+import static org.sonarsource.sonarlint.ls.settings.SettingsManager.DOTNET_DEFAULT_SOLUTION_PATH;
+import static org.sonarsource.sonarlint.ls.settings.SettingsManager.OMNISHARP_LOAD_PROJECT_ON_DEMAND;
+import static org.sonarsource.sonarlint.ls.settings.SettingsManager.OMNISHARP_PROJECT_LOAD_TIMEOUT;
+import static org.sonarsource.sonarlint.ls.settings.SettingsManager.OMNISHARP_USE_MODERN_NET;
+import static org.sonarsource.sonarlint.ls.settings.SettingsManager.SONARLINT_CONFIGURATION_NAMESPACE;
 
 @ExtendWith(LogTestStartAndEnd.class)
 public abstract class AbstractLanguageServerMediumTests {
@@ -159,7 +167,8 @@ public abstract class AbstractLanguageServerMediumTests {
     var py = fullPathToJar("sonarpython");
     var text = fullPathToJar("sonartext");
     var xml = fullPathToJar("sonarxml");
-    String[] languageServerArgs = new String[]{"" + port, "-analyzers", go, java, js, php, py, html, xml, text, iac};
+    var omnisharp = fullPathToJar("sonarlintomnisharp");
+    String[] languageServerArgs = new String[]{"-port", "" + port, "-analyzers", go, java, js, php, py, html, xml, text, iac, omnisharp};
     if (COMMERCIAL_ENABLED) {
       var cfamily = fullPathToJar("cfamily");
       languageServerArgs = ArrayUtils.add(languageServerArgs, cfamily);
@@ -239,10 +248,15 @@ public abstract class AbstractLanguageServerMediumTests {
     toBeClosed.clear();
     notebooksToBeClosed.clear();
 
+    setupGlobalSettings(client.globalSettings);
     setUpFolderSettings(client.folderSettings);
 
     notifyConfigurationChangeOnClient();
     verifyConfigurationChangeOnClient();
+  }
+
+  protected void setupGlobalSettings(Map<String, Object> globalSettings) {
+    // do nothing by default
   }
 
   protected void setUpFolderSettings(Map<String, Map<String, Object>> folderSettings) {
@@ -307,14 +321,15 @@ public abstract class AbstractLanguageServerMediumTests {
     CountDownLatch showRuleDescriptionLatch = new CountDownLatch(0);
     CountDownLatch suggestBindingLatch = new CountDownLatch(0);
     CountDownLatch readyForTestsLatch = new CountDownLatch(0);
+    ShowAllLocationsCommand.Param showIssueParams;
     SuggestBindingParams suggestedBindings;
     ShowRuleDescriptionParams ruleDesc;
     boolean isIgnoredByScm = false;
-    boolean isOpenInEditor = true;
+    boolean shouldAnalyseFile = true;
     final AtomicInteger needCompilationDatabaseCalls = new AtomicInteger();
     final Set<String> openedLinks = new HashSet<>();
-
     final Set<MessageParams> shownMessages = new HashSet<>();
+    final Map<String, NewCodeDefinitionDto> newCodeDefinitionCache = new HashMap<>();
 
     void clear() {
       diagnostics.clear();
@@ -329,7 +344,7 @@ public abstract class AbstractLanguageServerMediumTests {
       suggestBindingLatch = new CountDownLatch(0);
       readyForTestsLatch = new CountDownLatch(0);
       needCompilationDatabaseCalls.set(0);
-      isOpenInEditor = true;
+      shouldAnalyseFile = true;
     }
 
     @Override
@@ -384,12 +399,13 @@ public abstract class AbstractLanguageServerMediumTests {
       return CompletableFutures.computeAsync(cancelToken -> {
         List<Object> result;
         try {
-          assertThat(configurationParams.getItems()).extracting(ConfigurationItem::getSection).containsExactly("sonarlint");
+          assertThat(configurationParams.getItems()).extracting(ConfigurationItem::getSection).containsExactly(SONARLINT_CONFIGURATION_NAMESPACE,
+            DOTNET_DEFAULT_SOLUTION_PATH, OMNISHARP_USE_MODERN_NET, OMNISHARP_LOAD_PROJECT_ON_DEMAND, OMNISHARP_PROJECT_LOAD_TIMEOUT);
           result = new ArrayList<>(configurationParams.getItems().size());
           for (var item : configurationParams.getItems()) {
-            if (item.getScopeUri() == null) {
+            if (item.getScopeUri() == null && item.getSection().equals(SONARLINT_CONFIGURATION_NAMESPACE)) {
               result.add(globalSettings);
-            } else {
+            } else if (item.getScopeUri() != null && !item.getSection().equals(SONARLINT_CONFIGURATION_NAMESPACE)) {
               result
                 .add(Optional.ofNullable(folderSettings.get(item.getScopeUri()))
                   .orElseThrow(() -> new IllegalStateException("No settings mocked for workspaceFolderPath " + item.getScopeUri())));
@@ -405,6 +421,21 @@ public abstract class AbstractLanguageServerMediumTests {
     @Override
     public void readyForTests() {
       readyForTestsLatch.countDown();
+    }
+
+    @Override
+    public CompletableFuture<Boolean> askSslCertificateConfirmation(SslCertificateConfirmationParams params) {
+      return null;
+    }
+
+    @Override
+    public void showSoonUnsupportedVersionMessage(ShowSoonUnsupportedVersionMessageParams messageParams) {
+    }
+
+    @Override
+    public void submitNewCodeDefinition(SubmitNewCodeDefinitionParams params) {
+      newCodeDefinitionCache.put(params.getFolderUri(),
+        new NewCodeDefinitionDto(params.getNewCodeDefinitionOrMessage(), params.isSupported()));
     }
 
     @Override
@@ -431,6 +462,16 @@ public abstract class AbstractLanguageServerMediumTests {
     }
 
     @Override
+    public void doNotShowMissingRequirementsMessageAgain() {
+
+    }
+
+    @Override
+    public CompletableFuture<Boolean> canShowMissingRequirementsNotification() {
+      return CompletableFuture.completedFuture(false);
+    }
+
+    @Override
     public void showRuleDescription(ShowRuleDescriptionParams params) {
       this.ruleDesc = params;
       showRuleDescriptionLatch.countDown();
@@ -438,6 +479,11 @@ public abstract class AbstractLanguageServerMediumTests {
 
     @Override
     public void showHotspot(HotspotDetailsDto h) {
+    }
+
+    @Override
+    public void showIssue(ShowAllLocationsCommand.Param issue) {
+      this.showIssueParams = issue;
     }
 
     @Override
@@ -450,16 +496,18 @@ public abstract class AbstractLanguageServerMediumTests {
     }
 
     @Override
-    public CompletableFuture<Boolean> isOpenInEditor(String fileUri) {
-      return CompletableFutures.computeAsync(cancelToken -> isOpenInEditor);
+    public CompletableFuture<ShouldAnalyseFileCheckResult> shouldAnalyseFile(SonarLintExtendedLanguageServer.UriParams fileUri) {
+      return CompletableFutures.computeAsync(cancelToken -> new ShouldAnalyseFileCheckResult(shouldAnalyseFile, "reason"));
+
+    }
+
+    @Override
+    public CompletableFuture<FileUrisResult> filterOutExcludedFiles(FileUrisParams params) {
+      return CompletableFutures.computeAsync(cancelToken -> new FileUrisResult(params.getFileUris()));
     }
 
     @Override
     public void showFirstSecretDetectionNotification() {
-    }
-
-    @Override
-    public void showFirstCobolIssueDetectedNotification() {
     }
 
     @Override
@@ -607,10 +655,22 @@ public abstract class AbstractLanguageServerMediumTests {
       .didChange(new DidChangeTextDocumentParams(docId, List.of(new TextDocumentContentChangeEvent(content))));
   }
 
+  protected void didChangeNotebook(String uri, String content) {
+    var docId = new VersionedNotebookDocumentIdentifier(1, uri);
+    lsProxy.getNotebookDocumentService()
+      .didChange(new DidChangeNotebookDocumentParams(docId, new NotebookDocumentChangeEvent()));
+  }
+
   protected void didOpen(String uri, String languageId, String content) {
     lsProxy.getTextDocumentService()
       .didOpen(new DidOpenTextDocumentParams(new TextDocumentItem(uri, languageId, 1, content)));
     toBeClosed.add(uri);
+  }
+
+  protected void didClose(String uri) {
+    lsProxy.getTextDocumentService()
+      .didClose(new DidCloseTextDocumentParams(new TextDocumentIdentifier(uri)));
+    toBeClosed.remove(uri);
   }
 
   protected void didOpenNotebook(String uri, String... cellContents) {
@@ -682,5 +742,23 @@ public abstract class AbstractLanguageServerMediumTests {
     var newTempDir = Files.createTempDirectory(null);
     staticTempDirs.add(newTempDir);
     return newTempDir;
+  }
+
+  static class NewCodeDefinitionDto {
+    String newCodeDefinitionOrMessage;
+    boolean isSupported;
+
+    public NewCodeDefinitionDto(String newCodeDefinitionOrMessage, boolean isSupported) {
+      this.newCodeDefinitionOrMessage = newCodeDefinitionOrMessage;
+      this.isSupported = isSupported;
+    }
+
+    public String getNewCodeDefinitionOrMessage() {
+      return newCodeDefinitionOrMessage;
+    }
+
+    public boolean isSupported() {
+      return isSupported;
+    }
   }
 }

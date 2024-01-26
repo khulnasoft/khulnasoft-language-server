@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -25,7 +25,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Callable;
-import org.sonarsource.sonarlint.core.commons.log.SonarLintLogger;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Model.CommandSpec;
@@ -93,7 +92,7 @@ public class ServerMain implements Callable<Integer> {
     }
 
     if (!useStdio && deprecatedJsonRpcPort > 0) {
-      SonarLintLogger.get().warn("Warning: using deprecated positional parameter jsonRpcPort. Please, use -jsonRpcPort instead.");
+      System.err.println("Warning: using deprecated positional parameter jsonRpcPort. Please, use -jsonRpcPort instead.");
     }
   }
 

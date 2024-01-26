@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -24,17 +24,19 @@ import java.util.Collections;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.sonarsource.sonarlint.core.analysis.api.ClientModulesProvider;
 import org.sonarsource.sonarlint.core.commons.Language;
 import org.sonarsource.sonarlint.ls.log.LanguageClientLogOutput;
-import org.sonarsource.sonarlint.ls.settings.ServerConnectionSettings;
+import testutils.SonarLintLogTester;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 
 class EnginesFactoryTests {
+  @RegisterExtension
+  SonarLintLogTester logTester = new SonarLintLogTester();
   private EnginesFactory underTest;
 
   @BeforeEach
@@ -45,7 +47,7 @@ class EnginesFactoryTests {
       Paths.get("sonarjs.jar"),
       Paths.get("sonarhtml.jar"),
       Paths.get("sonarxml.jar"));
-    underTest = new EnginesFactory(standaloneAnalysers, Collections.emptyMap(), mock(LanguageClientLogOutput.class),
+    underTest = new EnginesFactory(standaloneAnalysers, Collections.emptyMap(), logTester.getLogger(),
       mock(NodeJsRuntime.class), mock(ClientModulesProvider.class));
     underTest = spy(underTest);
   }
@@ -53,8 +55,10 @@ class EnginesFactoryTests {
   @Test
   void get_standalone_languages() {
     assertThat(EnginesFactory.getStandaloneLanguages()).containsExactlyInAnyOrder(
+      Language.AZURERESOURCEMANAGER,
       Language.C,
       Language.CLOUDFORMATION,
+      Language.CS,
       Language.CSS,
       Language.CPP,
       Language.DOCKER,
@@ -63,6 +67,7 @@ class EnginesFactoryTests {
       Language.IPYTHON,
       Language.JAVA,
       Language.JS,
+      Language.JSON,
       Language.KUBERNETES,
       Language.PHP,
       Language.PYTHON,

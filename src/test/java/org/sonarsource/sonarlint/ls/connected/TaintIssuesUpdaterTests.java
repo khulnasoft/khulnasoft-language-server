@@ -1,6 +1,6 @@
 /*
  * SonarLint Language Server
- * Copyright (C) 2009-2023 SonarSource SA
+ * Copyright (C) 2009-2024 SonarSource SA
  * mailto:info AT sonarsource DOT com
  *
  * This program is free software; you can redistribute it and/or
@@ -37,9 +37,10 @@ import org.sonarsource.sonarlint.core.serverapi.EndpointParams;
 import org.sonarsource.sonarlint.core.serverconnection.ProjectBinding;
 import org.sonarsource.sonarlint.core.serverconnection.issues.ServerTaintIssue;
 import org.sonarsource.sonarlint.ls.DiagnosticPublisher;
+import org.sonarsource.sonarlint.ls.backend.BackendService;
+import org.sonarsource.sonarlint.ls.backend.BackendServiceFacade;
 import org.sonarsource.sonarlint.ls.folders.WorkspaceFolderWrapper;
 import org.sonarsource.sonarlint.ls.folders.WorkspaceFoldersManager;
-import org.sonarsource.sonarlint.ls.http.ApacheHttpClient;
 import org.sonarsource.sonarlint.ls.settings.ServerConnectionSettings;
 import org.sonarsource.sonarlint.ls.settings.SettingsManager;
 import org.sonarsource.sonarlint.ls.settings.WorkspaceSettings;
@@ -74,11 +75,13 @@ class TaintIssuesUpdaterTests {
   private final DiagnosticPublisher diagnosticPublisher = mock(DiagnosticPublisher.class);
   private final SettingsManager settingsManager = mock(SettingsManager.class);
   private final ServerConnectionSettings serverConnectionSettings = mock(ServerConnectionSettings.class);
-  private final ServerConnectionSettings.EndpointParamsAndHttpClient endpointParamsAndHttpClient = mock(ServerConnectionSettings.EndpointParamsAndHttpClient.class);
   private final ConnectedSonarLintEngine engine = mock(ConnectedSonarLintEngine.class);
+  private final BackendServiceFacade backendServiceFacade = mock(BackendServiceFacade.class);
+  private final BackendService backendService = mock(BackendService.class);
   private final Map<String, ServerConnectionSettings> SERVER_CONNECTIONS = Map.of(CONNECTION_ID, serverConnectionSettings);
   private final ImmediateExecutorService executorService = new ImmediateExecutorService();
-  private final TaintIssuesUpdater underTest = new TaintIssuesUpdater(bindingManager, new TaintVulnerabilitiesCache(), workspaceFoldersManager, settingsManager, diagnosticPublisher, executorService);
+  private final TaintIssuesUpdater underTest = new TaintIssuesUpdater(bindingManager, new TaintVulnerabilitiesCache(), workspaceFoldersManager, settingsManager,
+    diagnosticPublisher, executorService, backendServiceFacade, logTester.getLogger());
 
   @BeforeEach
   void init() {
@@ -93,32 +96,31 @@ class TaintIssuesUpdaterTests {
     when(binding.projectKey()).thenReturn(PROJECT_KEY);
     when(settingsManager.getCurrentSettings()).thenReturn(workspaceSettings);
     when(workspaceSettings.getServerConnections()).thenReturn(SERVER_CONNECTIONS);
-    when(serverConnectionSettings.getServerConfiguration()).thenReturn(endpointParamsAndHttpClient);
-    when(endpointParamsAndHttpClient.getEndpointParams()).thenReturn(mock(EndpointParams.class));
-    when(endpointParamsAndHttpClient.getHttpClient()).thenReturn(mock(ApacheHttpClient.class));
+    when(serverConnectionSettings.getEndpointParams()).thenReturn(mock(EndpointParams.class));
+    when(backendServiceFacade.getBackendService()).thenReturn(backendService);
   }
 
   @Test
   void should_sync_and_download_taints() {
     underTest.updateTaintIssuesAsync(FILE_URI);
 
-    verify(engine).syncServerTaintIssues(any(), any(), eq(PROJECT_KEY), eq(BRANCH_NAME), isNull());
     verify(engine).downloadAllServerTaintIssuesForFile(any(), any(), any(), anyString(), eq(BRANCH_NAME), isNull());
-    verify(engine).getServerTaintIssues(any(), eq(BRANCH_NAME), anyString());
+    verify(engine).getServerTaintIssues(any(), eq(BRANCH_NAME), anyString(), eq(false));
     verify(diagnosticPublisher).publishDiagnostics(FILE_URI, false);
+    verify(diagnosticPublisher).isFocusOnNewCode();
     verifyNoMoreInteractions(diagnosticPublisher);
     verifyNoMoreInteractions(engine);
   }
 
   @Test
   void should_log_number_of_downloaded_taints() {
-    var taint1 = new ServerTaintIssue("taint1", false, "ruleKey1", "message", "filePath", Instant.now(), IssueSeverity.CRITICAL, RuleType.VULNERABILITY, new TextRangeWithHash(1,1,1,1,""), null);
-    var taint2 = new ServerTaintIssue("taint2", false, "ruleKey2", "message", "filePath", Instant.now(), IssueSeverity.CRITICAL, RuleType.VULNERABILITY, new TextRangeWithHash(1,1,1,1,""), null);
-    when(engine.getServerTaintIssues(any(), any(), anyString())).thenReturn(List.of(taint1, taint2));
+    var taint1 = new ServerTaintIssue("taint1", false, "ruleKey1", "message", "filePath", Instant.now(), IssueSeverity.CRITICAL, RuleType.VULNERABILITY, new TextRangeWithHash(1, 1, 1, 1, ""), null, null, null);
+    var taint2 = new ServerTaintIssue("taint2", false, "ruleKey2", "message", "filePath", Instant.now(), IssueSeverity.CRITICAL, RuleType.VULNERABILITY, new TextRangeWithHash(1, 1, 1, 1, ""), null, null, null);
+    when(engine.getServerTaintIssues(any(), any(), anyString(), eq(false))).thenReturn(List.of(taint1, taint2));
 
     underTest.updateTaintIssuesAsync(FILE_URI);
 
-    assertThat(logTester.logs()).containsExactly("Fetched 2 vulnerabilities from Connection ID");
+    assertThat(logTester.logs()).anyMatch(log -> log.contains("Fetched 2 vulnerabilities from Connection ID"));
   }
 
   @Test
