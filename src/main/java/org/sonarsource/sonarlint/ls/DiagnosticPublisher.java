@@ -19,8 +19,16 @@
  */
 package org.sonarsource.sonarlint.ls;
 
+import com.google.gson.Gson;
+import java.io.IOException;
 import java.net.URI;
+import java.net.URISyntaxException;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 import javax.annotation.Nullable;
@@ -36,11 +44,13 @@ import org.sonarsource.sonarlint.ls.connected.DelegatingIssue;
 import org.sonarsource.sonarlint.ls.connected.TaintVulnerabilitiesCache;
 import org.sonarsource.sonarlint.ls.notebooks.OpenNotebooksCache;
 import org.sonarsource.sonarlint.ls.util.Utils;
+import org.sonarsource.sonarlint.ls.watcher.IssueParams;
 
 import static org.sonarsource.sonarlint.ls.util.Utils.buildMessageWithPluralizedSuffix;
 
 public class DiagnosticPublisher {
 
+  private Gson gson = new Gson();
   static final String SONARLINT_SOURCE = "sonarlint";
   static final String REMOTE_SOURCE = "remote";
 
@@ -55,9 +65,8 @@ public class DiagnosticPublisher {
   private final TaintVulnerabilitiesCache taintVulnerabilitiesCache;
   private final OpenNotebooksCache openNotebooksCache;
 
-  private boolean focusOnNewCode;
-
-  public DiagnosticPublisher(SonarLintExtendedLanguageClient client, TaintVulnerabilitiesCache taintVulnerabilitiesCache, IssuesCache issuesCache, IssuesCache hotspotsCache,
+  public DiagnosticPublisher(SonarLintExtendedLanguageClient client, TaintVulnerabilitiesCache taintVulnerabilitiesCache,
+    IssuesCache issuesCache, IssuesCache hotspotsCache,
     OpenNotebooksCache openNotebooksCache) {
     this.client = client;
     this.taintVulnerabilitiesCache = taintVulnerabilitiesCache;
@@ -76,16 +85,47 @@ public class DiagnosticPublisher {
       return;
     }
     if (!onlyHotspots) {
-      client.publishDiagnostics(createPublishDiagnosticsParams(f));
+      var diagnostics = createPublishDiagnosticsParams(f);
+      client.publishDiagnostics(diagnostics);
+
+      try {
+        var file = diagnostics.getUri().substring(diagnostics.getUri().lastIndexOf("/") + 1);
+        if (!diagnostics.getDiagnostics().isEmpty()) {
+          var listIssues = diagnostics.getDiagnostics().stream()
+            .map(diag -> new IssueParams(file, diag.getMessage(), diag.getSeverity().name(), diag.getCode().getLeft()))
+            .collect(toList());
+          processIssue(Map.of(file, listIssues));
+        } else {
+          processIssue(Map.of(file, Collections.emptyList()));
+        }
+      } catch (InterruptedException e) {
+        System.out.println("bugbug");
+      }
     }
     client.publishSecurityHotspots(createPublishSecurityHotspotsParams(f));
   }
 
-  Diagnostic convert(Map.Entry<String, VersionedIssue> entry) {
-    var issue = entry.getValue().issue();
-    return prepareDiagnostic(issue, entry.getKey(), false, focusOnNewCode);
+  public void processIssue(Map<String, List<IssueParams>> messages) throws InterruptedException {
+    var httpClient = java.net.http.HttpClient.newHttpClient();
+
+    var request = HttpRequest.newBuilder()
+      .uri(URI.create("http://localhost:8080/issues"))
+      .header("Content-type", "application/json")
+      .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(messages)))
+      .build();
+
+    try {
+      httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+    } catch (IOException e) {
+      System.out.println("grosbug");
+    }
   }
 
+  static Diagnostic convert(Map.Entry<String, VersionedIssue> entry) {
+    var issue = entry.getValue().getIssue();
+    var severity =
+      issue.getType() == RuleType.SECURITY_HOTSPOT ?
+        hotspotSeverity(issue.getVulnerabilityProbability().orElse(VulnerabilityProbability.MEDIUM)) : severity(issue.getSeverity());
 
   public void setFocusOnNewCode(boolean focusOnNewCode) {
     this.focusOnNewCode = focusOnNewCode;

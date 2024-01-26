@@ -27,8 +27,11 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.Socket;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -37,6 +40,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -45,10 +49,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import javax.annotation.CheckForNull;
 import javax.annotation.Nullable;
-import org.apache.commons.lang3.StringUtils;
+import org.eclipse.lsp4j.ClientCapabilities;
+import org.eclipse.lsp4j.ClientInfo;
 import org.eclipse.lsp4j.CodeAction;
 import org.eclipse.lsp4j.CodeActionParams;
 import org.eclipse.lsp4j.Command;
+import org.eclipse.lsp4j.DiagnosticWorkspaceCapabilities;
 import org.eclipse.lsp4j.DidChangeConfigurationParams;
 import org.eclipse.lsp4j.DidChangeNotebookDocumentParams;
 import org.eclipse.lsp4j.DidChangeTextDocumentParams;
@@ -72,10 +78,13 @@ import org.eclipse.lsp4j.NotebookSelectorCell;
 import org.eclipse.lsp4j.ServerCapabilities;
 import org.eclipse.lsp4j.ServerInfo;
 import org.eclipse.lsp4j.SetTraceParams;
+import org.eclipse.lsp4j.TextDocumentItem;
 import org.eclipse.lsp4j.TextDocumentSyncKind;
 import org.eclipse.lsp4j.TextDocumentSyncOptions;
 import org.eclipse.lsp4j.WindowClientCapabilities;
 import org.eclipse.lsp4j.WorkDoneProgressCancelParams;
+import org.eclipse.lsp4j.WorkspaceClientCapabilities;
+import org.eclipse.lsp4j.WorkspaceFolder;
 import org.eclipse.lsp4j.WorkspaceFoldersOptions;
 import org.eclipse.lsp4j.WorkspaceServerCapabilities;
 import org.eclipse.lsp4j.jsonrpc.CompletableFutures;
@@ -87,7 +96,9 @@ import org.eclipse.lsp4j.jsonrpc.messages.ResponseErrorCode;
 import org.eclipse.lsp4j.services.NotebookDocumentService;
 import org.eclipse.lsp4j.services.TextDocumentService;
 import org.eclipse.lsp4j.services.WorkspaceService;
+import org.jetbrains.annotations.NotNull;
 import org.sonarsource.sonarlint.core.SonarLintBackendImpl;
+import org.sonarsource.sonarlint.core.analysis.sonarapi.MultivalueProperty;
 import org.sonarsource.sonarlint.core.clientapi.backend.analysis.GetSupportedFilePatternsParams;
 import org.sonarsource.sonarlint.core.clientapi.backend.analysis.GetSupportedFilePatternsResponse;
 import org.sonarsource.sonarlint.core.clientapi.backend.binding.GetBindingSuggestionParams;
@@ -139,10 +150,12 @@ import org.sonarsource.sonarlint.ls.telemetry.TelemetryInitParams;
 import org.sonarsource.sonarlint.ls.util.EnumLabelsMapper;
 import org.sonarsource.sonarlint.ls.util.ExitingInputStream;
 import org.sonarsource.sonarlint.ls.util.Utils;
+import org.sonarsource.sonarlint.ls.watcher.WatchDir;
 
 import static java.lang.String.format;
 import static java.net.URI.create;
 import static java.util.Optional.ofNullable;
+import static org.sonarsource.sonarlint.core.analysis.container.analysis.filesystem.LanguageDetection.sanitizeExtension;
 import static org.sonarsource.sonarlint.ls.CommandManager.SONARLINT_OPEN_RULE_DESCRIPTION_FROM_CODE_ACTION_COMMAND;
 import static org.sonarsource.sonarlint.ls.CommandManager.SONARLINT_SHOW_SECURITY_HOTSPOT_FLOWS;
 import static org.sonarsource.sonarlint.ls.SonarLintExtendedLanguageClient.ConnectionCheckResult.failure;
@@ -194,8 +207,11 @@ public class SonarLintLanguageServer implements SonarLintExtendedLanguageServer,
   private final BackendServiceFacade backendServiceFacade;
   private final Collection<Path> analyzers;
   private final CountDownLatch shutdownLatch;
+  private final StandaloneSettings standaloneSettings;
 
-  SonarLintLanguageServer(InputStream inputStream, OutputStream outputStream, Collection<Path> analyzers) {
+  SonarLintLanguageServer(InputStream inputStream, OutputStream outputStream,
+    Collection<Path> analyzers, String workspacePath) {
+    standaloneSettings = new StandaloneSettings(workspacePath);
     this.threadPool = Executors.newCachedThreadPool(Utils.threadFactory("SonarLint LSP message processor", false));
     var input = new ExitingInputStream(inputStream, this);
     var launcher = new Launcher.Builder<SonarLintExtendedLanguageClient>()
@@ -274,15 +290,36 @@ public class SonarLintLanguageServer implements SonarLintExtendedLanguageServer,
     this.settingsManager.addListener(cleanAsYouCodeManager);
     this.shutdownLatch = new CountDownLatch(1);
     launcher.startListening();
+    bootstrapInitialization();
+    try {
+      new WatchDir(Paths.get(standaloneSettings.getWatchDirPath()), true, analysisScheduler).processEvents();
+    } catch (IOException e) {
+      System.out.println("WWWWW");
+    }
+  }
+
+  private void bootstrapInitialization() {
+    var params = new InitializeParams();
+    params.setWorkspaceFolders(List.of(new WorkspaceFolder(standaloneSettings.getWorkspaceFolderUri(), standaloneSettings.getWorkspaceFolderName())));
+    params.setTrace("MESSAGES");
+    params.setClientInfo(new ClientInfo("Standalone SonarLint", "1.0.0"));
+    var capabilities = new ClientCapabilities();
+    var workspaceCapabilities = new WorkspaceClientCapabilities();
+    var diagnosticWorkspaceCapabilities = new DiagnosticWorkspaceCapabilities();
+    diagnosticWorkspaceCapabilities.setRefreshSupport(true);
+    workspaceCapabilities.setDiagnostics(diagnosticWorkspaceCapabilities);
+    capabilities.setWorkspace(workspaceCapabilities);
+    params.setCapabilities(capabilities);
+    initialize(params);
   }
 
   static SonarLintLanguageServer bySocket(int port, Collection<Path> analyzers) throws IOException {
     var socket = new Socket("localhost", port);
-    return new SonarLintLanguageServer(socket.getInputStream(), socket.getOutputStream(), analyzers);
+    return new SonarLintLanguageServer(socket.getInputStream(), socket.getOutputStream(), analyzers, "");
   }
 
-  static SonarLintLanguageServer byStdio(List<Path> analyzers) {
-    return new SonarLintLanguageServer(System.in, System.out, analyzers);
+  static SonarLintLanguageServer byStdio(List<Path> analyzers, String workspacePath) {
+    return new SonarLintLanguageServer(System.in, System.out, analyzers, workspacePath);
   }
 
   @Override
@@ -465,11 +502,8 @@ public class SonarLintLanguageServer implements SonarLintExtendedLanguageServer,
       lsLogOutput.debug(String.format("Skipping text document analysis of notebook \"%s\"", uri));
       return;
     }
-    runIfAnalysisNeeded(uri.toString(), () -> {
-      var file = openFilesCache.didOpen(uri, params.getTextDocument().getLanguageId(), params.getTextDocument().getText(), params.getTextDocument().getVersion());
-      analysisScheduler.didOpen(file);
-      taintIssuesUpdater.updateTaintIssuesAsync(uri);
-    });
+    var file = openFilesCache.didOpen(uri, params.getTextDocument().getLanguageId(), params.getTextDocument().getText(), params.getTextDocument().getVersion());
+    analysisScheduler.didOpen(file);
   }
 
   @Override
@@ -904,54 +938,5 @@ public class SonarLintLanguageServer implements SonarLintExtendedLanguageServer,
     });
   }
 
-  @Override
-  public CompletableFuture<ReopenIssueResponse> reopenResolvedLocalIssues(ReopenAllIssuesForFileParams params) {
-    var reopenAllIssuesParams = new org.sonarsource.sonarlint.core.clientapi.backend.issue.ReopenAllIssuesForFileParams(params.getConfigurationScopeId(), params.getRelativePath());
-    return backendServiceFacade.getBackendService().reopenAllIssuesForFile(reopenAllIssuesParams).thenApply(r -> {
-      if (r.isIssueReopened()) {
-        analysisScheduler.didChange(create(params.getFileUri()));
-        client.showMessage(new MessageParams(MessageType.Info, "Reopened local issues for " + params.getRelativePath()));
-      } else {
-        client.showMessage(new MessageParams(MessageType.Info, "There are no resolved issues in file " + params.getRelativePath()));
-      }
-      return r;
-    }).exceptionally(e -> {
-      lsLogOutput.error("Error while reopening resolved local issues", e);
-      client.showMessage(new MessageParams(MessageType.Error, "Could not reopen resolved local issues. Look at the SonarLint output for details."));
-      return null;
-    });
-  }
 
-  @Override
-  public CompletableFuture<Void> analyseOpenFileIgnoringExcludes(AnalyseOpenFileIgnoringExcludesParams params) {
-    var notebookUriStr = params.getNotebookUri();
-    if (notebookUriStr != null) {
-      var version = params.getNotebookVersion();
-      var notebookUri = create(notebookUriStr);
-      Objects.requireNonNull(version);
-      var cells = Objects.requireNonNull(params.getNotebookCells());
-      var notebookFile = VersionedOpenNotebook.create(
-        notebookUri, version,
-        cells, notebookDiagnosticPublisher);
-      var versionedOpenFile = notebookFile.asVersionedOpenFile();
-      openNotebooksCache.didOpen(notebookUri, version, cells);
-      analysisScheduler.didOpen(versionedOpenFile);
-    } else {
-      var document = Objects.requireNonNull(params.getTextDocument());
-      var file = openFilesCache.didOpen(create(document.getUri()), document.getLanguageId(), document.getText(), document.getVersion());
-      analysisScheduler.didOpen(file);
-    }
-    return CompletableFuture.completedFuture(null);
-  }
-
-  private void runIfAnalysisNeeded(String uri, Runnable analyse) {
-    client.shouldAnalyseFile(new SonarLintExtendedLanguageServer.UriParams(uri)).thenAccept(checkResult -> {
-      if (Boolean.TRUE.equals(checkResult.isShouldBeAnalysed())) {
-        analyse.run();
-      } else {
-        var reason = Objects.requireNonNull(checkResult.getReason());
-        lsLogOutput.info(reason + " \"" + uri + "\"");
-      }
-    });
-  }
 }
